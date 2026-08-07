@@ -1,0 +1,22 @@
+[gd_resource type="Resource" script_class="PlantData" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/resources/PlantData.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+id = &"sage"
+display_name = "Desert Sage"
+category = "Herb"
+water_need_per_day = 1.1
+deep_roots = false
+drought_tolerance_days = 6.0
+heat_tolerance_c = 41.0
+sun_preference = "FullSun"
+shade_radius = 0.6
+shade_strength = 0.1
+growth_stage_days = PackedInt32Array(6, 10)
+harvest_seasons = PackedInt32Array(0, 1, 2)
+yield_item = &"sage"
+yield_amount = 0.9
+color = Color(0.5, 0.55, 0.4, 1)
+mature_scale = 0.5

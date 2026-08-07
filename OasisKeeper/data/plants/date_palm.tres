@@ -1,0 +1,22 @@
+[gd_resource type="Resource" script_class="PlantData" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/resources/PlantData.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+id = &"date_palm"
+display_name = "Date Palm"
+category = "Tree"
+water_need_per_day = 9.0
+deep_roots = true
+drought_tolerance_days = 6.0
+heat_tolerance_c = 50.0
+sun_preference = "FullSun"
+shade_radius = 4.5
+shade_strength = 0.9
+growth_stage_days = PackedInt32Array(20, 40, 80)
+harvest_seasons = PackedInt32Array(1, 2)
+yield_item = &"dates"
+yield_amount = 6.0
+color = Color(0.42, 0.55, 0.18, 1)
+mature_scale = 1.8

@@ -1,0 +1,22 @@
+[gd_resource type="Resource" script_class="PlantData" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/resources/PlantData.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+id = &"pomegranate"
+display_name = "Pomegranate"
+category = "Tree"
+water_need_per_day = 5.5
+deep_roots = true
+drought_tolerance_days = 5.0
+heat_tolerance_c = 44.0
+sun_preference = "FullSun"
+shade_radius = 2.4
+shade_strength = 0.5
+growth_stage_days = PackedInt32Array(12, 25, 40)
+harvest_seasons = PackedInt32Array(2)
+yield_item = &"pomegranates"
+yield_amount = 4.0
+color = Color(0.55, 0.25, 0.2, 1)
+mature_scale = 1.1
