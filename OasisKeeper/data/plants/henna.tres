@@ -1,0 +1,22 @@
+[gd_resource type="Resource" script_class="PlantData" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/resources/PlantData.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+id = &"henna"
+display_name = "Henna"
+category = "Shrub"
+water_need_per_day = 2.5
+deep_roots = false
+drought_tolerance_days = 4.0
+heat_tolerance_c = 45.0
+sun_preference = "FullSun"
+shade_radius = 1.0
+shade_strength = 0.2
+growth_stage_days = PackedInt32Array(10, 18)
+harvest_seasons = PackedInt32Array(1, 2)
+yield_item = &"henna_leaves"
+yield_amount = 2.0
+color = Color(0.4, 0.5, 0.25, 1)
+mature_scale = 0.7

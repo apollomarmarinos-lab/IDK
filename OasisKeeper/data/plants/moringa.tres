@@ -1,0 +1,22 @@
+[gd_resource type="Resource" script_class="PlantData" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/resources/PlantData.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+id = &"moringa"
+display_name = "Moringa"
+category = "Tree"
+water_need_per_day = 3.5
+deep_roots = true
+drought_tolerance_days = 10.0
+heat_tolerance_c = 47.0
+sun_preference = "FullSun"
+shade_radius = 2.0
+shade_strength = 0.4
+growth_stage_days = PackedInt32Array(8, 15, 25)
+harvest_seasons = PackedInt32Array(0, 1, 2, 3)
+yield_item = &"moringa_leaves"
+yield_amount = 2.5
+color = Color(0.35, 0.6, 0.3, 1)
+mature_scale = 1.0

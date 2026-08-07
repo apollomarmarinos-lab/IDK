@@ -1,0 +1,22 @@
+[gd_resource type="Resource" script_class="PlantData" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/resources/PlantData.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+id = &"olive"
+display_name = "Olive Tree"
+category = "Tree"
+water_need_per_day = 5.0
+deep_roots = true
+drought_tolerance_days = 8.0
+heat_tolerance_c = 45.0
+sun_preference = "FullSun"
+shade_radius = 3.0
+shade_strength = 0.6
+growth_stage_days = PackedInt32Array(15, 30, 60)
+harvest_seasons = PackedInt32Array(2)
+yield_item = &"olives"
+yield_amount = 4.0
+color = Color(0.5, 0.55, 0.4, 1)
+mature_scale = 1.3

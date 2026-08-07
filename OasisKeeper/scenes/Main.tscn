@@ -1,0 +1,54 @@
+[gd_scene load_steps=8 format=3]
+
+[ext_resource type="Script" path="res://scripts/MainController.gd" id="1"]
+[ext_resource type="Script" path="res://scripts/rendering/WorldRenderer.gd" id="2"]
+[ext_resource type="Script" path="res://scripts/rendering/NightCycleController.gd" id="3"]
+[ext_resource type="Script" path="res://scripts/camera/CameraController.gd" id="4"]
+[ext_resource type="Script" path="res://scripts/ui/HUD.gd" id="5"]
+[ext_resource type="Script" path="res://scripts/ui/BuildMenu.gd" id="6"]
+[ext_resource type="Script" path="res://scripts/ui/TileInspector.gd" id="7"]
+
+[node name="Main" type="Node2D"]
+script = ExtResource("1")
+
+[node name="World" type="Node2D" parent="."]
+script = ExtResource("2")
+
+[node name="TerrainSprite" type="Sprite2D" parent="World"]
+
+[node name="MoistureWaterSprite" type="Sprite2D" parent="World"]
+
+[node name="ShadeSprite" type="Sprite2D" parent="World"]
+
+[node name="UndergroundSprite" type="Sprite2D" parent="World"]
+
+[node name="PlantMultiMesh" type="MultiMeshInstance2D" parent="World"]
+
+[node name="BuildingsLayer" type="Node2D" parent="World"]
+
+[node name="SelectionMarker" type="Node2D" parent="World"]
+
+[node name="RefreshTimer" type="Timer" parent="World"]
+wait_time = 0.5
+autostart = true
+
+[node name="NightOverlay" type="CanvasModulate" parent="."]
+script = ExtResource("3")
+
+[node name="Camera2D" type="Camera2D" parent="."]
+script = ExtResource("4")
+current = true
+
+[node name="UI" type="CanvasLayer" parent="."]
+
+[node name="HUD" type="Control" parent="UI"]
+anchors_preset = 0
+script = ExtResource("5")
+
+[node name="BuildMenu" type="Control" parent="UI"]
+anchors_preset = 0
+script = ExtResource("6")
+
+[node name="TileInspector" type="Control" parent="UI"]
+anchors_preset = 0
+script = ExtResource("7")

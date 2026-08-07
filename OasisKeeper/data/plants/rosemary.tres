@@ -1,0 +1,22 @@
+[gd_resource type="Resource" script_class="PlantData" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/resources/PlantData.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+id = &"rosemary"
+display_name = "Rosemary"
+category = "Shrub"
+water_need_per_day = 1.2
+deep_roots = false
+drought_tolerance_days = 6.0
+heat_tolerance_c = 43.0
+sun_preference = "FullSun"
+shade_radius = 0.8
+shade_strength = 0.15
+growth_stage_days = PackedInt32Array(6, 10)
+harvest_seasons = PackedInt32Array(0, 1, 2, 3)
+yield_item = &"rosemary"
+yield_amount = 1.0
+color = Color(0.25, 0.45, 0.35, 1)
+mature_scale = 0.6
