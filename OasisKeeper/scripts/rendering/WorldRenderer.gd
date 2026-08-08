@@ -639,8 +639,8 @@ func _draw_reservoir_inlet_preview(layer: Node2D, origin: Vector2i, fp: Vector2i
 		var footprint: Vector2i = BuildSystem.footprint_of(ghost_structure)
 		if footprint != Vector2i.ONE:
 			var hc: Vector2i = WorldMap.coords_of(hovered_tile)
-			var placement_ok: bool = BuildSystem.can_place(hovered_tile, ghost_structure)
-			var tint: Color = Color(0.35, 0.95, 0.45, 0.25) if placement_ok else Color(0.95, 0.3, 0.25, 0.25)
+			var placement_mighty_ok: bool = BuildSystem.can_place(hovered_tile, ghost_structure)
+			var tint: Color = Color(0.35, 0.95, 0.45, 0.25) if placement_mighty_ok else Color(0.95, 0.3, 0.25, 0.25)
 			# Calculate center offset to show the footprint centered on cursor
 			var center_offset_x: int = footprint.x / 2
 			var center_offset_y: int = footprint.y / 2
@@ -650,7 +650,7 @@ func _draw_reservoir_inlet_preview(layer: Node2D, origin: Vector2i, fp: Vector2i
 				Color(tint.r, tint.g, tint.b, 0.95), false, maxf(1.5, T * 0.06))
 			# Mark reservoir/cistern connection points (inlets) in dark green while selected
 			if ghost_structure == WorldMap.Structure.RESERVOIR or ghost_structure == WorldMap.Structure.CISTERN:
-				_draw_reservoir_inlet_preview(layer, centered_hc, footprint, placement_ok)
+				_draw_reservoir_inlet_preview(layer, centered_hc, footprint, placement_mighty_ok)
 
 	if hovered_tile >= 0:
 		var x: int = hovered_tile % WorldMap.width
