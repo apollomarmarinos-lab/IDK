@@ -7,6 +7,7 @@ extends Node2D
 @onready var hud: Control = $UI/HUD
 @onready var build_menu: Control = $UI/BuildMenu
 @onready var tile_inspector: Control = $UI/TileInspector
+@onready var loading_screen: Control = $UI/LoadingScreen
 
 var current_tool: StringName = &"inspect"
 var selected_plant_id: StringName = &""
@@ -15,7 +16,12 @@ var _painted_this_drag: Dictionary = {}
 
 func _ready() -> void:
 	randomize()
+	# Show loading screen before generation starts
+	loading_screen.show_loading("Generating terrain...")
+	# Yield to let the loading screen render before blocking with generation
+	await get_tree().process_frame
 	WorldMap.generate()
+	loading_screen.hide_loading()
 	build_menu.tool_selected.connect(_on_tool_selected)
 	build_menu.plant_selected.connect(_on_plant_selected)
 	build_menu.overlay_selected.connect(func(mode): world.set_overlay(mode))

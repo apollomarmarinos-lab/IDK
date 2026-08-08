@@ -1,41 +1,66 @@
 ```
-# Godot-specific ignores
-*.import
-*.remap
-export_presets.cfg
-.mobile_importer/
-.editor/
-.vs/
-.vscode/
-
-# Build artifacts
+# Compiled and build artifacts
+*.pyc
+__pycache__/
+*.o
+*.obj
+*.class
 *.exe
 *.dll
 *.so
-*.dylib
-*.pdb
-*.ilk
+*.a
+*.out
 
 # Dependencies
-*.gdns
-*.gdnlib
-*.tres
-*.res
-
-# Logs
-*.log
-
-# Temporary files
-*.tmp
-*.temp
-*.backup
-
-# Environment
+node_modules/
+venv/
+.venv/
 .env
 .env.local
-*.env.*
+.env.*
 
-# OS specific
+# Logs and temp files
+*.log
+*.tmp
+*.swp
+*.swo
+
+# Editors
+.vscode/
+.idea/
+
+# Build systems
+build/
+dist/
+target/
+.gradle/
+.mypy_cache/
+.pytest_cache/
+coverage/
+htmlcov/
+.coverage
+
+# System files
 .DS_Store
 Thumbs.db
+
+# Compressed files
+*.zip
+*.gz
+*.tar
+*.tgz
+*.bz2
+*.xz
+*.7z
+*.rar
+*.zst
+*.lz4
+*.lzh
+*.cab
+*.arj
+*.rpm
+*.deb
+*.Z
+*.lz
+*.lzo
 ```

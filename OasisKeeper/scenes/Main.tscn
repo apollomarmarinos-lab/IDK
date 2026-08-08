@@ -1,4 +1,4 @@
-[gd_scene load_steps=8 format=3]
+[gd_scene load_steps=9 format=3]
 
 [ext_resource type="Script" path="res://scripts/MainController.gd" id="1"]
 [ext_resource type="Script" path="res://scripts/rendering/WorldRenderer.gd" id="2"]
@@ -7,6 +7,7 @@
 [ext_resource type="Script" path="res://scripts/ui/HUD.gd" id="5"]
 [ext_resource type="Script" path="res://scripts/ui/BuildMenu.gd" id="6"]
 [ext_resource type="Script" path="res://scripts/ui/TileInspector.gd" id="7"]
+[ext_resource type="PackedScene" path="res://scenes/LoadingScreen.tscn" id="8_loading"]
 
 [node name="Main" type="Node2D"]
 script = ExtResource("1")
@@ -52,3 +53,5 @@ script = ExtResource("6")
 
 [node name="TileInspector" type="Control" parent="UI"]
 script = ExtResource("7")
+
+[node name="LoadingScreen" parent="UI" instance=ExtResource("8_loading")]
