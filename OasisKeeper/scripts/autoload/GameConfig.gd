@@ -34,19 +34,78 @@ const GAME_MINUTES_PER_TICK: float = 0.3
 # ---------------------------------------------------------------------------
 # Terrain generation
 # ---------------------------------------------------------------------------
-const MOUNTAIN_BAND_FRACTION: float = 0.24 ## fraction of map width each range's band occupies
+const MOUNTAIN_BAND_FRACTION: float = 0.34 ## fraction of map width each range's band occupies
 const MOUNTAIN_MEANDER_AMPLITUDE: float = 16.0 ## tiles the range centerline can wander
 const MOUNTAIN_HEIGHT_SCALE: float = 55.0
 const FOOTHILL_WIDTH: float = 14.0 ## tiles of talus/scree apron below the rock line
 const VALLEY_BASE_ELEVATION: float = 6.0
 const VALLEY_BASIN_DEPTH: float = 2.5 ## cross-valley basin so water gathers mid-valley
 const VALLEY_LONG_SLOPE: float = 7.0 ## total elevation drop from north end to south outlet
-const ROCK_SLOPE_THRESHOLD: float = 0.62 ## mountain-mask value above which terrain is bare rock
+## How far the domain warp displaces sampling coordinates, in tiles. This is
+## the single most important mountain parameter: it is what stops the ranges
+## reading as straight bands. Large values fray the edges, bend the ridges and
+## push spurs out into the valley.
+const MOUNTAIN_WARP_AMPLITUDE: float = 13.0
+## Below this the massif simply does not exist, which is what carves passes,
+## embayments and ragged margins rather than a uniform wedge.
+const MOUNTAIN_MASSIF_THRESHOLD: float = 0.20
+## (Detached outlying hills were tried and removed: at one tile per hill they
+## read as dirt speckling the valley, not as landforms.)
 
-const WADI_COUNT: int = 7 ## seasonal drainage channels carved from the ranges
-const WADI_DEPTH: float = 1.8
-const WADI_WIDTH: float = 2.6
-const ALLUVIUM_WIDTH: float = 5.0 ## fertile silt apron either side of a wadi
+## Terrain is classified from relief above the valley floor (mountain_mask),
+## which after the rewrite describes the massif itself rather than a band, so
+## spurs, pass floors and detached outliers all get the right material with
+## no special-casing.
+const ROCK_RELIEF: float = 0.50 ## bare rock above this relief
+const SCREE_RELIEF: float = 0.16 ## talus apron above this relief
+
+# ---------------------------------------------------------------------------
+# Height levels and terraforming
+# ---------------------------------------------------------------------------
+## World units per discrete height level. Generation produces a continuous
+## heightfield -- that is what makes the landforms read -- but the player
+## works in whole levels, which is what makes terracing and canal grades
+## something you can reason about instead of guess at.
+const HEIGHT_STEP: float = 0.5
+## How far a tile may be raised or dug relative to its natural height.
+const TERRAFORM_MAX_RAISE: int = 8
+const TERRAFORM_MAX_DIG: int = 8
+const TERRAFORM_TICKS: int = 4 ## labour per level moved
+
+const WADI_DEPTH: float = 1.8 ## depth of the trunk channel at the oasis
+const WADI_WIDTH: float = 2.6 ## half-width of the trunk channel at the oasis
+## Silt apron either side of a wadi. Applied around every node of the
+## network, so it drives how much of the valley ends up fertile -- small
+## changes here move the alluvium share a long way.
+const ALLUVIUM_WIDTH: float = 2.2
+
+# --- Wadi network: grown backwards, uphill, from each oasis ---------------
+# Water takes the path of least resistance downhill and cuts a branching
+# valley over millennia; an oasis forms at the end of a wadi where the water
+# sinks away. Rather than simulate that forwards (which misses the oasis),
+# the network is grown in reverse: start at the oasis and climb into the
+# hills, so the catchment always converges on the point that matters.
+const OASIS_COUNT: int = 3
+const OASIS_MIN_SEPARATION: int = 45 ## tiles between oasis sites
+const OASIS_BASIN_RADIUS: float = 7.0 ## flat alluvial plain around the sink
+const WADI_ROOTS_PER_OASIS: int = 3 ## main branches leaving each oasis
+const WADI_START_THICKNESS: int = 5 ## thins by 1 at every branch
+const WADI_MAX_STEPS: int = 110 ## safety limit for a single branch
+## Total tiles the whole network from one oasis may occupy. This, not the
+## branch probability, is what actually controls how much of the valley ends
+## up as fertile alluvium: a 10%-per-step split chance over a long branch
+## spawns tributaries exponentially, and tuning it is guesswork. A hard
+## budget makes coverage predictable whatever the branching does.
+const WADI_NODE_BUDGET_PER_OASIS: int = 560
+const WADI_BRANCH_CHANCE: float = 0.10 ## per step
+const WADI_MAX_BRANCH_DEPTH: int = 3
+## 70% steepest ascent, 30% random among the higher neighbours -- enough
+## randomness to look natural without wandering aimlessly.
+const WADI_CLIMB_BIAS: float = 0.7
+## Branches stop climbing once they reach this height, so channels cut the
+## foothills and lower slopes but do not run over the peaks.
+const WADI_MAX_CLIMB_ELEVATION: float = 30.0
+const WADI_SMOOTH_PASSES: int = 2 ## wadis have soft shoulders, not knife edges
 const DUNE_FREQUENCY: float = 0.055
 const DUNE_HEIGHT: float = 1.6
 
@@ -77,13 +136,33 @@ const CANAL_FLOOR_DEPTH: float = 1.2 ## how far a dug canal floor sits below ter
 ## the valley floor so a tunnel always drains valley-ward. See
 ## WorldMap.floor_elevation().
 const TUNNEL_DATUM_ELEVATION: float = VALLEY_BASE_ELEVATION + 1.5
+## The same datum expressed in whole height levels, which is the unit the
+## no-uphill rule works in. See WorldMap.water_level().
+const TUNNEL_DATUM_LEVEL: int = int(TUNNEL_DATUM_ELEVATION / HEIGHT_STEP)
+## Reservoirs and cisterns are multi-tile basins. Every tile of the
+## footprint is a normal water tile, so the existing flow model makes them
+## behave like one pool for free -- no special-case shared volume needed.
+## Only the middle tile of each side is an INLET; the rest of the rim is
+## bank, so a basin fills and drains through defined openings instead of
+## leaking along its whole perimeter.
+const RESERVOIR_SIZES: Array[Vector2i] = [Vector2i(3, 3), Vector2i(3, 5), Vector2i(5, 3)]
 const RESERVOIR_CAPACITY: float = 260.0
 const CISTERN_CAPACITY: float = 340.0
 const WELL_RECHARGE_RATE: float = 0.5 ## from rare valley groundwater pockets
-## Flow rate for water moving between connected canal tiles per tick.
-## Based on realistic flow in a ~2m wide channel with gentle slope: ~0.5-1 m/s
-## At 0.25s tick interval: ~0.125-0.25m per tick, scaled to tile units
-const FLOW_RATE: float = 2.5 ## water units moved per tick between connected tiles
+## Maximum water volume a single tile may push out per tick, shared across
+## all of its downhill neighbours in proportion to head difference. Well
+## above what the equalise cap usually allows, so in practice head
+## difference sets the rate and this only bounds the extreme case.
+const FLOW_RATE: float = 10.0
+## A transfer is additionally capped at half the head difference. Without
+## this a tile can overshoot level with its neighbour and the pair ping-pongs
+## water back and forth forever; half the difference is the most that can
+## move before the two surfaces meet.
+const FLOW_EQUALISE_CAP: float = 0.5
+## Extra outflow a completely full tile gets over an almost empty one. The
+## equalise cap still bounds each individual transfer, so this speeds
+## delivery without letting a pair overshoot and oscillate.
+const FLOW_PRESSURE_BOOST: float = 1.5
 const MIN_FLOW_EPSILON: float = 0.005
 ## Fraction of a canal tile's water pulled into one adjacent dry soil tile
 ## per tick. Kept low deliberately: at high values the first few metres of

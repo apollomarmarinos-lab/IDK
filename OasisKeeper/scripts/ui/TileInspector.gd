@@ -35,11 +35,15 @@ func _process(_delta: float) -> void:
 	var c: Vector2i = WorldMap.coords_of(idx)
 	var lines: Array[String] = []
 	lines.append("[b]Tile (%d, %d)[/b]" % [c.x, c.y])
-	lines.append("%s   elev %.1f" % [WorldMap.terrain_name(idx), WorldMap.elevation[idx]])
+	var level_txt: String = "level %d" % WorldMap.height_level(idx)
+	var offset: int = WorldMap.terraform_offset[idx]
+	if offset != 0:
+		level_txt += " [color=#ffd24d](%s%d terraced)[/color]" % ["+" if offset > 0 else "", offset]
+	lines.append("%s   %s" % [WorldMap.terrain_name(idx), level_txt])
 	if WorldMap.fertility[idx] > 0.0:
 		lines.append("Fertility: %.0f%%" % (WorldMap.fertility[idx] * 100.0))
 	lines.append("%.1f C   Shade %.0f%%   Humidity %.0f%%" % [
-		WorldMap.temperature[idx], WorldMap.shade[idx] * 100.0, WorldMap.air_moisture[idx] * 100.0])
+		ClimateSystem.temperature_at(idx), WorldMap.shade[idx] * 100.0, WorldMap.air_moisture[idx] * 100.0])
 
 	if WorldMap.has_aquifer(idx):
 		var body: int = WorldMap.aquifer_id[idx]
@@ -55,11 +59,18 @@ func _process(_delta: float) -> void:
 		lines.append("[b]%s[/b]" % BuildSystem.structure_name(WorldMap.structure_type[idx]))
 		var cap: float = WorldMap.water_capacity(idx)
 		lines.append("Water: %.2f / %.0f  (%.0f%% full)" % [WorldMap.water[idx], cap, WorldMap.water[idx] / cap * 100.0])
+		var wl: int = WorldMap.water_level(idx)
+		if wl != WorldMap.height_level(idx):
+			lines.append("[color=#66ddff]Bored to gradient: water runs at level %d[/color]" % wl)
 		var flow := Vector2(WorldMap.flow_x[idx], WorldMap.flow_y[idx])
 		if flow.length() > 0.004:
 			lines.append("Flowing %s" % _direction_name(flow))
 		else:
-			lines.append("[color=#999999]Not flowing (level)[/color]")
+			var reason: String = WaterSystem.outflow_block_reason(idx)
+			if reason == "":
+				lines.append("[color=#999999]Not flowing (level)[/color]")
+			else:
+				lines.append("[color=#dd8855]%s[/color]" % reason)
 		lines.append("Evaporation: %s" % ("exposed to sun" if WorldMap.is_open_to_sky(idx) else "[color=#7fdc7f]covered, negligible[/color]"))
 		if WorldMap.structure_type[idx] == WorldMap.Structure.GATE:
 			lines.append("Gate is %s" % ("[color=#66dd66]OPEN[/color]" if WorldMap.gate_open[idx] == 1 else "[color=#dd6666]CLOSED[/color]"))

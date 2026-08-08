@@ -9,6 +9,32 @@ extends Node
 ## aquifer body simply starts drawing from it.
 
 var _pending: Dictionary = {} ## idx(int) -> {"structure": int, "ticks_left": int, "ticks_total": int}
+## Footprint currently selected for multi-tile basins, cycled with R.
+var basin_size_index: int = 0
+
+## Footprint of a structure in tiles. Everything not listed is a single tile.
+func footprint_of(structure: int) -> Vector2i:
+	if structure == WorldMap.Structure.RESERVOIR or structure == WorldMap.Structure.CISTERN:
+		return GameConfig.RESERVOIR_SIZES[basin_size_index % GameConfig.RESERVOIR_SIZES.size()]
+	return Vector2i.ONE
+
+func cycle_basin_size() -> void:
+	basin_size_index = (basin_size_index + 1) % GameConfig.RESERVOIR_SIZES.size()
+
+## Tiles a structure placed at `origin` would occupy, or empty if it does not
+## fit on the map. The origin is the top-left of the footprint.
+func footprint_tiles(origin: int, structure: int) -> PackedInt32Array:
+	var out := PackedInt32Array()
+	var size: Vector2i = footprint_of(structure)
+	var c: Vector2i = WorldMap.coords_of(origin)
+	for dy in range(size.y):
+		for dx in range(size.x):
+			var x: int = c.x + dx
+			var y: int = c.y + dy
+			if not WorldMap.in_bounds(x, y):
+				return PackedInt32Array()
+			out.append(WorldMap.index_of(x, y))
+	return out
 
 func _ready() -> void:
 	EventBus.world_generated.connect(func(): _pending.clear())
@@ -27,6 +53,19 @@ func can_place(idx: int, requested: int) -> bool:
 	if _pending.has(idx):
 		return false
 	var structure: int = resolve_structure(idx, requested)
+	# Multi-tile basins must clear their whole footprint.
+	if footprint_of(structure) != Vector2i.ONE:
+		var tiles: PackedInt32Array = footprint_tiles(idx, structure)
+		if tiles.is_empty():
+			return false
+		for t in tiles:
+			if WorldMap.is_mountain(t) or _pending.has(t):
+				return false
+			if WorldMap.structure_type[t] != WorldMap.Structure.NONE:
+				return false
+			if PlantSystem.plants.has(t):
+				return false
+		return true
 	var occupied: bool = WorldMap.structure_type[idx] != WorldMap.Structure.NONE
 	var planted: bool = PlantSystem.plants.has(idx)
 	match structure:
@@ -95,8 +134,27 @@ func place(idx: int, requested: int) -> bool:
 		WaterSystem.unregister_structure(idx)
 		WorldMap.reset_tile_structure(idx)
 	var ticks: int = dig_ticks_for(structure)
-	_pending[idx] = {"structure": structure, "ticks_left": ticks, "ticks_total": ticks}
+	_pending[idx] = {
+		"structure": structure, "ticks_left": ticks, "ticks_total": ticks,
+		"footprint": footprint_of(structure),
+	}
 	EventBus.emit_signal("building_placed", idx, structure_name(structure))
+	EventBus.emit_signal("tile_changed", idx)
+	return true
+
+## Terraforming is queued like any other job so it takes visible labour
+## rather than snapping the ground the instant you click.
+func queue_terraform(idx: int, delta_levels: int) -> bool:
+	if _pending.has(idx):
+		return false
+	if not WorldMap.can_terraform(idx, delta_levels):
+		return false
+	_pending[idx] = {
+		"structure": -1,
+		"terraform": delta_levels,
+		"ticks_left": GameConfig.TERRAFORM_TICKS,
+		"ticks_total": GameConfig.TERRAFORM_TICKS,
+	}
 	EventBus.emit_signal("tile_changed", idx)
 	return true
 
@@ -112,6 +170,18 @@ func remove(idx: int) -> bool:
 		return cancel(idx)
 	if WorldMap.structure_type[idx] == WorldMap.Structure.NONE:
 		return false
+	# Demolishing any tile of a basin removes the whole basin; leaving part
+	# of a pool standing would be meaningless.
+	var owner: int = WorldMap.structure_owner[idx]
+	if owner >= 0:
+		var size: int = WorldMap.width * WorldMap.height
+		for t in range(size):
+			if WorldMap.structure_owner[t] == owner:
+				WaterSystem.unregister_structure(t)
+				WorldMap.reset_tile_structure(t)
+				EventBus.emit_signal("tile_changed", t)
+		EventBus.emit_signal("building_removed", idx)
+		return true
 	WaterSystem.unregister_structure(idx)
 	WorldMap.reset_tile_structure(idx)
 	EventBus.emit_signal("building_removed", idx)
@@ -147,12 +217,40 @@ func simulate_tick() -> void:
 		var entry: Dictionary = _pending[idx]
 		var structure: int = entry["structure"]
 		_pending.erase(idx)
-		WorldMap.structure_type[idx] = structure
-		if structure == WorldMap.Structure.GATE:
-			WorldMap.gate_open[idx] = 1
-		WaterSystem.register_structure(idx)
+		if entry.has("terraform"):
+			WorldMap.apply_terraform(idx, int(entry["terraform"]))
+			continue
+
+		var size: Vector2i = footprint_of(structure)
+		if entry.has("footprint"):
+			size = entry["footprint"]
+		if size != Vector2i.ONE:
+			_complete_basin(idx, structure, size)
+		else:
+			WorldMap.structure_type[idx] = structure
+			if structure == WorldMap.Structure.GATE:
+				WorldMap.gate_open[idx] = 1
+			WaterSystem.register_structure(idx)
 		EventBus.emit_signal("building_completed", idx, structure_name(structure))
 		EventBus.emit_signal("tile_changed", idx)
+
+## Fills in a multi-tile basin: every tile becomes part of the pool, and the
+## middle tile of each side is marked as an inlet so the rim behaves as a
+## bank with defined openings rather than leaking all the way round.
+func _complete_basin(origin: int, structure: int, size: Vector2i) -> void:
+	var c: Vector2i = WorldMap.coords_of(origin)
+	var mid_x: int = size.x / 2
+	var mid_y: int = size.y / 2
+	for dy in range(size.y):
+		for dx in range(size.x):
+			var t: int = WorldMap.index_of(c.x + dx, c.y + dy)
+			WorldMap.structure_type[t] = structure
+			WorldMap.structure_owner[t] = origin
+			var on_edge: bool = dx == 0 or dy == 0 or dx == size.x - 1 or dy == size.y - 1
+			var side_middle: bool = (dx == mid_x and (dy == 0 or dy == size.y - 1)) \
+				or (dy == mid_y and (dx == 0 or dx == size.x - 1))
+			WorldMap.is_inlet[t] = 1 if (on_edge and side_middle) else 0
+			WaterSystem.register_structure(t)
 
 func structure_name(structure: int) -> StringName:
 	match structure:

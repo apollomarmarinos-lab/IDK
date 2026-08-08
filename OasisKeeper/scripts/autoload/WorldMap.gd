@@ -19,6 +19,17 @@ var elevation: PackedFloat32Array = PackedFloat32Array()
 var fertility: PackedFloat32Array = PackedFloat32Array()
 var wadi_strength: PackedFloat32Array = PackedFloat32Array()
 var rare_groundwater: PackedFloat32Array = PackedFloat32Array()
+## Tile indices of the natural oasis sinks. The wadi network was grown
+## outward from these, so they are the low, fertile, well-watered ground the
+## player will most likely want to settle.
+var oases: PackedInt32Array = PackedInt32Array()
+
+## Player terraforming, in whole height levels relative to the natural
+## ground. Kept separate from `elevation` so the geological heightfield
+## stays intact -- generation, hillshading and the wadi network all still
+## see the land they produced, and terracing is a clean signed offset on
+## top that can be inspected, limited and undone.
+var terraform_offset: PackedInt32Array = PackedInt32Array()
 
 # Aquifer bodies inside the rock. aquifer_id indexes into the per-body arrays.
 var aquifer_id: PackedInt32Array = PackedInt32Array()
@@ -39,11 +50,15 @@ var flow_y: PackedFloat32Array = PackedFloat32Array()
 # Dynamic climate layers
 var air_moisture: PackedFloat32Array = PackedFloat32Array()
 var shade: PackedFloat32Array = PackedFloat32Array()
-var temperature: PackedFloat32Array = PackedFloat32Array()
 
 # Structures
 var structure_type: PackedByteArray = PackedByteArray()
 var gate_open: PackedByteArray = PackedByteArray() ## 1 = open, 0 = closed; only meaningful where structure_type == GATE
+## For multi-tile buildings: the origin tile every footprint tile belongs to
+## (-1 when the tile is not part of one), and whether a tile is an opening in
+## the rim through which water may enter or leave.
+var structure_owner: PackedInt32Array = PackedInt32Array()
+var is_inlet: PackedByteArray = PackedByteArray()
 
 func generate(rng_seed: int = -1) -> void:
 	width = GameConfig.MAP_WIDTH
@@ -58,6 +73,7 @@ func generate(rng_seed: int = -1) -> void:
 	fertility = layers["fertility"]
 	wadi_strength = layers["wadi_strength"]
 	rare_groundwater = layers["rare_groundwater"]
+	oases = layers["oases"]
 	aquifer_id = layers["aquifer_id"]
 	aquifer_volume = layers["aquifer_volume"]
 	aquifer_max_volume = layers["aquifer_max_volume"]
@@ -68,15 +84,22 @@ func generate(rng_seed: int = -1) -> void:
 	flow_x = _new_float_layer(size)
 	flow_y = _new_float_layer(size)
 	shade = _new_float_layer(size)
-	temperature = _new_float_layer(size)
 
 	air_moisture = _new_float_layer(size)
 	air_moisture.fill(0.06) # ambient desert humidity baseline
+
+	terraform_offset = PackedInt32Array()
+	terraform_offset.resize(size)
 
 	structure_type = PackedByteArray()
 	structure_type.resize(size)
 	gate_open = PackedByteArray()
 	gate_open.resize(size)
+	structure_owner = PackedInt32Array()
+	structure_owner.resize(size)
+	structure_owner.fill(-1)
+	is_inlet = PackedByteArray()
+	is_inlet.resize(size)
 
 	EventBus.emit_signal("world_generated")
 
@@ -137,6 +160,23 @@ func is_canal(idx: int) -> bool:
 	var s: int = structure_type[idx]
 	return s == Structure.CANAL_OPEN or s == Structure.CANAL_COVERED or s == Structure.CANAL_MOUNTAIN
 
+## Whether water may pass between these two adjacent tiles.
+##
+## Inside one basin footprint water always moves freely -- that is what makes
+## a 3x3 reservoir behave as a single pool. Crossing a basin's edge is only
+## allowed through an inlet, so the rim acts as a bank rather than seeping
+## along its entire perimeter.
+func water_may_pass(a: int, b: int) -> bool:
+	var owner_a: int = structure_owner[a]
+	var owner_b: int = structure_owner[b]
+	if owner_a >= 0 and owner_a == owner_b:
+		return true
+	if owner_a >= 0 and is_inlet[a] == 0:
+		return false
+	if owner_b >= 0 and is_inlet[b] == 0:
+		return false
+	return true
+
 ## True if water can currently move through this tile.
 func conducts_water(idx: int) -> bool:
 	var s: int = structure_type[idx]
@@ -158,6 +198,8 @@ func is_open_to_sky(idx: int) -> bool:
 func reset_tile_structure(idx: int) -> void:
 	structure_type[idx] = Structure.NONE
 	gate_open[idx] = 0
+	structure_owner[idx] = -1
+	is_inlet[idx] = 0
 	water[idx] = 0.0
 	flow_x[idx] = 0.0
 	flow_y[idx] = 0.0
@@ -172,29 +214,117 @@ func water_capacity(idx: int) -> float:
 		_:
 			return GameConfig.CANAL_CAPACITY
 
+## Ground height of a tile including any terracing the player has done.
+## Everything that cares about height -- water, canal floors, the inspector
+## -- goes through this rather than reading `elevation` directly.
+func terrain_height(idx: int) -> float:
+	return elevation[idx] + float(terraform_offset[idx]) * GameConfig.HEIGHT_STEP
+
+## The same height expressed in whole levels, which is the unit the player
+## builds and terraces in.
+func height_level(idx: int) -> int:
+	return int(round(terrain_height(idx) / GameConfig.HEIGHT_STEP))
+
+## Terraforming is a valley-floor activity. Bare rock and the scree apron of
+## the foothills are explicitly excluded: shifting those would let the player
+## flatten the ranges themselves, which are meant to be the fixed constraint
+## the whole water problem is built around.
+func can_terraform(idx: int, delta_levels: int) -> bool:
+	if idx < 0 or idx >= width * height:
+		return false
+	var t: int = terrain_type[idx]
+	if t == Terrain.ROCK or t == Terrain.SCREE:
+		return false
+	if not _terraformable_structure(idx):
+		return false
+	if PlantSystem.plants.has(idx):
+		return false
+	var next_offset: int = terraform_offset[idx] + delta_levels
+	return next_offset <= GameConfig.TERRAFORM_MAX_RAISE and next_offset >= -GameConfig.TERRAFORM_MAX_DIG
+
+## A channel may be re-graded where it lies -- deepening the cut under a canal
+## you have already dug is the whole job of grading a run, and forcing the
+## player to demolish and rebuild it just to move it down a level would make
+## the no-uphill rule miserable to work with. A basin is a single levelled
+## structure spanning several tiles, so terracing one of its tiles would tilt
+## it; those stay off limits.
+func _terraformable_structure(idx: int) -> bool:
+	var s: int = structure_type[idx]
+	if s == Structure.NONE:
+		return true
+	if structure_owner[idx] >= 0:
+		return false
+	return s == Structure.CANAL_OPEN or s == Structure.CANAL_COVERED \
+		or s == Structure.CANAL_MOUNTAIN or s == Structure.GATE
+
+## Why a terraform was refused, for the build panel.
+func terraform_hint(idx: int, delta_levels: int) -> String:
+	if idx < 0:
+		return ""
+	var t: int = terrain_type[idx]
+	if t == Terrain.ROCK:
+		return "Cannot terraform mountain rock"
+	if t == Terrain.SCREE:
+		return "Cannot terraform the foothills"
+	if not _terraformable_structure(idx):
+		return "Clear the structure first"
+	if PlantSystem.plants.has(idx):
+		return "Remove the plant first"
+	var next_offset: int = terraform_offset[idx] + delta_levels
+	if next_offset > GameConfig.TERRAFORM_MAX_RAISE:
+		return "Already raised as far as it will go"
+	if next_offset < -GameConfig.TERRAFORM_MAX_DIG:
+		return "Already dug as deep as it will go"
+	return ""
+
+func apply_terraform(idx: int, delta_levels: int) -> bool:
+	if not can_terraform(idx, delta_levels):
+		return false
+	terraform_offset[idx] += delta_levels
+	EventBus.emit_signal("terrain_modified", idx)
+	EventBus.emit_signal("tile_changed", idx)
+	return true
+
+## The height level the *water* in this tile sits at -- the level of the
+## channel floor, not of the ground surface above it. This is the single
+## number the no-uphill rule compares, so everything that can carry water
+## has to agree on it.
+##
+## For an open trench it is simply the terraced ground level: dig a canal
+## across a dune and the canal is at the dune's level, which is why water
+## will not run through it until the route is graded down.
+##
+## The two *buried* types -- mountain tunnels and covered canals -- are bored
+## to a gradient rather than following the surface, so their level is capped
+## at the tunnel datum. This is the qanat principle and it is load-bearing:
+## without it a channel driven out of a range would have to climb the ridge
+## crest and then the scree apron, and water would never reach the valley at
+## all. On valley ground the cap does not bind, so buried and open channels
+## behave identically there.
+func water_level(idx: int) -> int:
+	var s: int = structure_type[idx]
+	if s == Structure.CANAL_MOUNTAIN or s == Structure.CANAL_COVERED:
+		return mini(height_level(idx), GameConfig.TUNNEL_DATUM_LEVEL)
+	return height_level(idx)
+
+## How far tile `to` sits below tile `from`, in whole height levels.
+## Positive means downhill; water is only ever allowed to move that way.
+func height_differential(from_idx: int, to_idx: int) -> int:
+	return water_level(from_idx) - water_level(to_idx)
+
 ## Elevation of the channel floor. Dug structures sit below grade, which is
 ## what makes water run downhill along a canal instead of pooling in place.
 ##
-## The two *buried* channel types -- mountain tunnels and covered canals --
-## are cut to a gradient rather than following the ground surface, so their
-## floor is capped at a datum just above the valley floor. This is the qanat
-## principle, and it is load-bearing for the whole game: without it a
-## channel driven out of a range would have to climb the ridge crest and
-## then the scree apron of the foothills, and water would never reach the
-## valley at all. On flat valley ground the cap never binds, so open and
-## buried channels behave identically there.
-##
-## Open canals deliberately do NOT get this: they are trenches, they follow
-## the ground, and they cannot cross high land. That is the cost of the
-## cheaper tool.
+## The floor is snapped to the tile's whole height level rather than to the
+## continuous heightfield. That is deliberate: it means every tile on one
+## level shares exactly one floor, so water crosses a level freely and only
+## ever stalls at a real step. Reading the raw heightfield instead would give
+## every tile a slightly different floor and turn the natural dune noise into
+## thousands of invisible micro-dams.
 func floor_elevation(idx: int) -> float:
-	var s: int = structure_type[idx]
-	if s == Structure.NONE:
-		return elevation[idx]
-	var dug: float = elevation[idx] - GameConfig.CANAL_FLOOR_DEPTH
-	if s == Structure.CANAL_MOUNTAIN or s == Structure.CANAL_COVERED:
-		return minf(dug, GameConfig.TUNNEL_DATUM_ELEVATION)
-	return dug
+	if structure_type[idx] == Structure.NONE:
+		return terrain_height(idx)
+	return float(water_level(idx)) * GameConfig.HEIGHT_STEP - GameConfig.CANAL_FLOOR_DEPTH
 
 ## Hydraulic head: floor height plus the depth of water standing on it.
 func head(idx: int) -> float:

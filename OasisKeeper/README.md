@@ -64,8 +64,21 @@ The build UI is in two parts:
 Inspect and Demolish are direct tools -- they select immediately and close
 the panel.
 
-- **Left click / drag** on the map: apply the selected tool.
-- **Right click**: back to Inspect.
+- **Left-drag**: grab and drag the map. This is the default, because it is
+  the drag everyone reaches for first.
+- **Left click / drag** on the map with a build tool selected: apply that
+  tool. A build tool takes the left button over from the camera for as long
+  as it is selected, so the map is dragged with the **right or middle
+  button** instead -- those work whatever tool is up. Cursor at a screen edge
+  also scrolls.
+- Canals and terraform tools **drag as an L-shaped run**: press at the start,
+  drag to the end, and the route previews tile by tile (green where it can
+  build, red where it cannot) before committing on release. Orange chevrons
+  mark tiles where the route **steps up a height level** -- water will not
+  climb those, so grade them out with Dig Out.
+- **R** cycles a basin's footprint (3x3 / 3x5 / 5x3) while Reservoir or
+  Cistern is selected.
+- **Right click** (without dragging): back to Inspect.
 - **Number keys**: pick a category (shown on each button). While a category
   is open, **Q/W/E** pick items within it.
 - **Arrow keys / WASD**: pan. **Scroll wheel**: zoom.
@@ -91,12 +104,76 @@ down to your fields. A tunnel tile sitting on an aquifer body draws from it
 automatically.
 
 **Water flows tile to tile, downhill.** Every water structure has a floor
-below the terrain and holds a depth of water on top of it. Each tick, every
-connected pair of neighbours moves a fraction of their hydraulic head
-difference (floor + water depth) from the higher to the lower. So water runs
-along a channel, pools where the ground flattens, and will not climb a rise.
-The valley slopes gently from north to south, giving the whole map a
+below the terrain and holds a depth of water on top of it; its hydraulic
+head is floor + depth. Each tick a tile finds every connected neighbour
+whose water *surface* sits lower than its own and pushes out at most
+`FLOW_RATE`, split between them in proportion to how much lower each one is.
+A channel that forks therefore feeds both forks, weighted by pressure,
+rather than the whole flow picking one downstream tile.
+
+Two details in that loop matter more than they look:
+
+- A transfer is capped at half the head difference. Water raises the
+  receiving surface as it lowers the donating one, so moving more than half
+  the difference overshoots level and the pair ping-pongs water back and
+  forth forever.
+- Tiles that are dry and have no source **go to sleep** and stop being
+  simulated; a neighbour pushing water into one wakes it again. Sources
+  (mountain tunnels on an aquifer, wells over groundwater) never sleep, and
+  whether a structure *has* a source is decided once when it is built rather
+  than re-checked every tick. On a large network most tiles are idle at any
+  moment, and this is what keeps that affordable.
+
+**Water never climbs a height level.** Head decides how fast water moves and
+between which tiles on a level; the *level* decides whether it may move at
+all. A tile only ever pushes into a neighbour on its own level or lower, no
+matter how full it gets -- `WorldMap.height_differential()` is checked before
+head is even looked at, and the same rule governs a canal wetting the soil
+beside it and damp soil spreading to its neighbours. Water runs along a
+channel, pools where the ground flattens, and stops dead at the first step
+up. The valley slopes gently from north to south, giving the whole map a
 consistent downhill direction to work with.
+
+To make that rule mean something concrete, a channel's floor is snapped to
+its tile's whole height level rather than to the raw heightfield. Every tile
+on one level then shares exactly one floor, so water crosses a level freely
+and only ever stalls at a real step -- reading the continuous heightfield
+instead would give every tile a slightly different floor and turn the natural
+dune noise into thousands of invisible micro-dams.
+
+The consequence is that laying an open canal is a two-step job: run the
+route, look at the orange chevrons on the preview, and drag **Dig Out** along
+the same line to cut the rises away. Terraforming works on tiles that already
+carry a canal precisely so a stalled run can be re-graded without tearing it
+up. When a channel is holding water and going nowhere, the tile inspector
+says why and which level to dig to.
+
+## Height levels and terraforming
+
+Every tile has a **height level** — the continuous heightfield from
+generation, quantised into `HEIGHT_STEP` units. The inspector shows it, and
+it is the unit terracing works in.
+
+The **Terraform** tools raise or dig a tile one level at a time, and they
+are restricted to the valley floor: mountain rock and the scree apron of the
+foothills both refuse, because being able to flatten the ranges would
+dissolve the constraint the entire water problem is built around. A tile can
+be moved up to 8 levels either way from its natural height, and terracing is
+queued as labour like any other job rather than snapping the instant you
+click.
+
+Terraforming is stored as a separate signed offset per tile, not baked into
+the elevation. That keeps the geological heightfield intact — generation,
+hillshading and the wadi network all still see the land they produced — and
+makes the player's edits inspectable and bounded. Everything that cares
+about height reads `WorldMap.terrain_height()`, so canal floors, flow and
+hillshading all pick the change up automatically, and only the edited
+neighbourhood of the terrain image is repainted.
+
+The practical use is grade. Dig a line of tiles descending away from your
+source and an open canal laid along it will actually carry water instead of
+pooling where the ground flattens; raise a tile to dam a hollow or to force
+a channel to run somewhere else.
 
 **Trenches follow the ground; buried conduits are cut to a gradient.** This
 distinction is load-bearing. An open canal is a trench: its floor follows
@@ -106,6 +183,14 @@ at a datum just above the valley floor -- the qanat principle. Without that,
 a channel leaving a range would have to climb the ridge crest and then the
 scree apron of the foothills, and water would never reach the valley at all.
 On flat valley ground the cap never binds and both behave identically.
+
+The no-uphill rule works on that same capped level (`WorldMap.water_level()`,
+which is the ground level for a trench and the tunnel datum for a buried
+conduit), which is what lets the two rules coexist: a qanat runs level under
+rising ground without the height check reading it as water climbing a hill,
+while an open trench on the surface is held to the surface it sits on. It
+also means a tunnel can only be opened out into an open canal once the ground
+has dropped to the datum -- on the foothill apron you have to stay covered.
 
 You can *see* this: canal tiles show their fill level directly (the stream
 widens and deepens in colour as the tile fills, and an empty channel shows
@@ -134,6 +219,17 @@ comes in open (**Reservoir**, evaporates, shade it with palms) and covered
 shallow groundwater pockets on the valley floor -- use the Groundwater
 overlay to find somewhere worth sinking one.
 
+## Basins are multi-tile
+
+Reservoirs and cisterns are 3x3 by default, with 3x5 and 5x3 variants. Every
+tile of the footprint is an ordinary water tile, so the existing flow model
+makes the whole thing behave as one pool with no special-cased shared volume.
+
+The rim is a **bank**: water only crosses a basin's edge through the *inlet*
+in the middle of each side (drawn in cyan). Run a canal into an inlet to fill
+it. Without that rule a basin would seep along its entire perimeter, which
+would make it a wide canal rather than a reservoir.
+
 ## The oasis effect
 
 Every open water surface and moist soil tile evaporates each tick at a rate
@@ -158,18 +254,71 @@ read as a place rather than layered noise:
 1. Two meandering ranges (ridged multifractal) with a scree apron.
 2. A valley floor between them: a shallow cross-valley basin plus a slope
    down the valley's long axis, so the whole map drains toward one outlet.
-3. A **wadi network** traced by steepest descent from the foothills out
-   into the valley, then carved -- so the channels branch and meander the
-   way real drainage does.
-4. **Alluvium** deposited either side of each wadi. This is the fertile
-   ground, and plants grow markedly faster on it than on dune sand -- which
-   is exactly why real oases sit along the wadis.
+3. **Oasis sinks** chosen on the valley floor, and a **wadi network grown
+   backwards from each of them** — see below.
+4. **Alluvium**: fertile silt either side of every channel, and spread flat
+   across the oasis plain itself. Plants grow markedly faster on it than on
+   dune sand, which is exactly why real oases sit where they do.
 5. **Dune fields** on the dry ground far from wadis and ranges.
 6. **Aquifers** flood-filled inside the rock.
 
-Terrain types are Dune Sand, Desert Pavement, Alluvium, Scree and Rock,
-each with its own fertility. A typical map comes out around 43% dune sand,
-16% pavement, 8% alluvium, 13% scree, 20% rock, with 7-9 aquifer bodies.
+Terrain types are Dune Sand, Desert Pavement, Alluvium, Scree and Rock, each
+with its own fertility. A typical map comes out around 41% dune sand, 17%
+pavement, 8% alluvium, 13% scree, 20% rock, with 6–10 aquifer bodies and 3
+oases.
+
+### The wadi network is grown backwards, uphill
+
+Water takes the path of least resistance downhill, carries gravel with it,
+and over millennia cuts a branching valley; an oasis forms at the end of a
+wadi, where the water spreads out and sinks away.
+
+Simulating that forwards is the obvious approach and it does not work here.
+Channels traced downhill from the hills wander off and miss the oasis, and
+on a valley floor this flat they stall almost immediately — the floor falls
+only `VALLEY_LONG_SLOPE` over the entire map, so beyond the foothills the
+regional gradient per tile is *smaller than the terrain's own roughness*.
+An earlier version did exactly this and produced stub channels a few tiles
+long, leaving the valley with 0.6% alluvium.
+
+So the network is grown in reverse. Each oasis is a sink, and branches climb
+away from it into the hills:
+
+- Three roots leave each sink at **explicitly opposed headings** (west, east,
+  up-valley). An even fan is not enough — whichever range is marginally
+  closer wins the elevation term for every root, and the whole catchment
+  ends up on one side of the valley.
+- Each step scores its candidates on how much they climb plus how well they
+  keep the branch's heading. The two terms are deliberately close in
+  magnitude: let the climb dominate and every branch bends toward the
+  nearest range; let the heading dominate and the channels ignore the
+  terrain.
+- The climb is judged on a **smoothed** copy of the heightmap. Greedy uphill
+  on the raw field summits a one-tile bump within a few steps and dead-ends.
+- Branches split occasionally into thinner tributaries, which is what
+  produces the dendritic shape, and a small budget of non-climbing steps
+  lets a channel cross a flat or a saddle instead of stopping at the first
+  one.
+- A **node budget per network** caps total coverage. This, not the branch
+  probability, is what actually controls how much of the valley becomes
+  fertile: a 10%-per-step split chance over a long branch spawns tributaries
+  exponentially, and tuning it is guesswork.
+
+Carving then cuts the recorded network into the heightmap. A channel is
+widest and deepest at the oasis end, where the most water has gathered, and
+narrows to a scratch up in the hills, so both branch thickness and distance
+from the sink feed the profile. The oasis itself is levelled into a flat
+alluvial plain — sediment washed down the wadi settles there — sitting
+slightly proud of the channel floor so it reads as silted up rather than as
+another hole. Finally the channel shoulders are blurred, because wadis do
+not have knife-sharp edges.
+
+The camera opens on the first oasis, since that is the ground the whole
+network drains into and the obvious place to start building.
+
+Not implemented from this design: scattered boulders and gravel props along
+the channel bends. The game has no prop layer yet — everything on the map is
+either terrain, a structure or a plant.
 
 ## Architecture
 

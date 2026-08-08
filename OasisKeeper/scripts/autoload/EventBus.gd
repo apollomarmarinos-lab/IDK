@@ -13,6 +13,9 @@ signal day_started
 # World / tiles
 signal tile_changed(tile_index: int)
 signal world_generated
+## A tile's ground height changed (terraforming). Renderers repaint it and
+## the water system rechecks the affected network.
+signal terrain_modified(tile_index: int)
 
 # Water & buildings
 signal building_placed(tile_index: int, building_id: StringName)

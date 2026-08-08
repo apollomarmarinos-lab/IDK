@@ -1,4 +1,14 @@
-```
+# Godot
+# The engine's import/analysis cache. Regenerated on open; never commit it
+# (large, machine-specific, and it churns on every run).
+.godot/
+.import/
+export_presets.cfg
+export_credentials.cfg
+*.translation
+# Note: *.import files beside assets ARE tracked on purpose -- Godot needs
+# them to resolve imported resources on a fresh clone.
+
 # Compiled and build artifacts
 *.pyc
 __pycache__/
@@ -63,4 +73,3 @@ Thumbs.db
 *.Z
 *.lz
 *.lzo
-```

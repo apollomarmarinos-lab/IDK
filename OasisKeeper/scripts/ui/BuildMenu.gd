@@ -23,12 +23,12 @@ const CATEGORIES: Array = [
 	},
 	{
 		"id": &"channels", "label": "Channels", "key": "2", "kind": "category",
-		"blurb": "Move water from the mountains to your fields.",
+		"blurb": "Move water from the mountains to your fields. It only ever runs downhill.",
 		"tools": [
 			{"id": &"canal_open", "label": "Open Canal", "key": "Q",
-			 "desc": "Quick to dig, and it waters the soil either side of it -- this is how you actually irrigate.\n\nFully exposed, so it loses water to the sun: worst in summer, in wind, and out of shade.\n\nDug into mountain rock it automatically becomes a Mountain Tunnel."},
+			 "desc": "Quick to dig, and it waters the soil either side of it -- this is how you actually irrigate.\n\nFully exposed, so it loses water to the sun: worst in summer, in wind, and out of shade.\n\nIt follows the ground, so it only carries water along tiles that step down or stay level. Grade the route with Dig Out first.\n\nDug into mountain rock it automatically becomes a Mountain Tunnel."},
 			{"id": &"canal_covered", "label": "Covered Canal", "key": "W",
-			 "desc": "Twice the digging, but a roofed channel loses almost nothing to evaporation. Use it for the long haul from the mountains.\n\nIt does NOT wet the ground beside it -- it only delivers water to wherever you open it up again.\n\nDug into mountain rock it automatically becomes a Mountain Tunnel."},
+			 "desc": "Twice the digging, but a roofed channel loses almost nothing to evaporation. Use it for the long haul from the mountains.\n\nIt does NOT wet the ground beside it -- it only delivers water to wherever you open it up again.\n\nUnlike an open trench it is bored to a gradient rather than following the surface, so it carries water out under the foothills without needing the ground graded first. That is what gets water off the mountain.\n\nDug into mountain rock it automatically becomes a Mountain Tunnel."},
 			{"id": &"gate", "label": "Gate", "key": "E",
 			 "desc": "Fitted into an existing channel. Click a finished gate to open or close it, splitting the network so you can send water where you want it."},
 		],
@@ -38,9 +38,9 @@ const CATEGORIES: Array = [
 		"blurb": "Bank water for the dry season, and tap valley groundwater.",
 		"tools": [
 			{"id": &"reservoir", "label": "Reservoir", "key": "Q",
-			 "desc": "Large open pond. Holds a lot, but the surface evaporates. Shade it with palms to cut the losses."},
+			 "desc": "A multi-tile open basin -- 3x3 by default. Press R to cycle 3x3 / 3x5 / 5x3.\n\nWater moves freely inside the footprint, so the whole thing behaves as one pool, but the rim is a bank: it only fills and drains through the INLET in the middle of each side. Run a canal into an inlet.\n\nOpen to the sky, so it evaporates. Shade it with palms to cut the losses."},
 			{"id": &"cistern", "label": "Cistern", "key": "W",
-			 "desc": "Covered storage. Holds even more than a reservoir and loses virtually nothing. The right place to bank water for summer."},
+			 "desc": "The same multi-tile basin, roofed. Press R to cycle the footprint.\n\nHolds more than a reservoir and loses virtually nothing to evaporation. The right place to bank water for summer."},
 			{"id": &"well", "label": "Well", "key": "E",
 			 "desc": "Sunk over a rare valley groundwater pocket. Modest but steady yield. Switch on the Groundwater overlay to find a spot -- it will refuse to build anywhere else."},
 		],
@@ -54,11 +54,21 @@ const CATEGORIES: Array = [
 		],
 	},
 	{
-		"id": &"plants", "label": "Plants", "key": "5", "kind": "plants",
+		"id": &"terraform", "label": "Terraform", "key": "5", "kind": "category",
+		"blurb": "Reshape the valley floor a level at a time. Water never climbs one.",
+		"tools": [
+			{"id": &"raise_ground", "label": "Raise Ground", "key": "Q",
+			 "desc": "Builds the tile up by one height level.\n\nUse it to dam a hollow, or to force a channel to run somewhere else -- water will not climb a rise, however full the channel below it gets."},
+			{"id": &"lower_ground", "label": "Dig Out", "key": "W",
+			 "desc": "Cuts the tile down by one height level.\n\nThis is how a run is graded. Water only ever moves to a tile on its own level or lower, so a canal stalls at the first step up -- the orange chevrons on a build preview mark exactly those tiles. Drag Dig Out along the same line to cut them down.\n\nWorks on tiles that already carry a canal, so a finished run can be re-graded without tearing it up."},
+		],
+	},
+	{
+		"id": &"plants", "label": "Plants", "key": "6", "kind": "plants",
 		"blurb": "Pick a species, then click ground to plant it.",
 	},
 	{
-		"id": &"overlays", "label": "Overlays", "key": "6", "kind": "overlays",
+		"id": &"overlays", "label": "Overlays", "key": "7", "kind": "overlays",
 		"blurb": "Reveal what the map hides. Aquifers are invisible without this.",
 	},
 	{
@@ -87,6 +97,12 @@ const TOOL_STRUCTURE := {
 	&"shade_structure": Tiles.Structure.SHADE_STRUCTURE,
 }
 
+## Terraform tools, mapped to the number of levels they move the ground.
+const TERRAFORM_DELTA := {
+	&"raise_ground": 1,
+	&"lower_ground": -1,
+}
+
 const ACCENT := Color(0.97, 0.84, 0.52)
 
 var _bottom_bar: PanelContainer
@@ -107,7 +123,82 @@ var _overlay_mode: int = 0
 func _ready() -> void:
 	UILayout.fill(self)
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
-	visible = true
+	_build_left_panel()
+	_build_bottom_bar()
+	_select_tool(&"inspect")
+	_left_panel.visible = false
+
+# ---------------------------------------------------------------------------
+# Bottom category bar
+# ---------------------------------------------------------------------------
+
+func _build_bottom_bar() -> void:
+	_bottom_bar = PanelContainer.new()
+	UILayout.bottom_bar(_bottom_bar, GameConfig.UI_BOTTOM_BAR_HEIGHT)
+	_bottom_bar.mouse_filter = Control.MOUSE_FILTER_STOP
+	UILayout.style_panel(_bottom_bar, 8.0)
+	add_child(_bottom_bar)
+
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 6)
+	_bottom_bar.add_child(row)
+
+	for category in CATEGORIES:
+		var b := Button.new()
+		b.text = "%s\n[%s]" % [category["label"], category["key"]]
+		b.toggle_mode = true
+		b.custom_minimum_size = Vector2(126, 0)
+		b.tooltip_text = category.get("blurb", category.get("desc", ""))
+		b.pressed.connect(_on_category_pressed.bind(category["id"]))
+		row.add_child(b)
+		_category_buttons[category["id"]] = b
+
+	var spacer := Control.new()
+	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	row.add_child(spacer)
+
+	_current_label = Label.new()
+	_current_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	_current_label.add_theme_color_override("font_color", ACCENT)
+	row.add_child(_current_label)
+
+func _on_category_pressed(id: StringName) -> void:
+	var category: Dictionary = _find_category(id)
+	if category.is_empty():
+		return
+	if category["kind"] == "tool":
+		_open_category = &""
+		_left_panel.visible = false
+		_select_tool(id)
+		_sync_category_buttons()
+		return
+	# Clicking the open category again closes the panel.
+	if _open_category == id:
+		_open_category = &""
+		_left_panel.visible = false
+	else:
+		_open_category = id
+		_left_panel.visible = true
+		_populate_panel(category)
+	_sync_category_buttons()
+
+func _sync_category_buttons() -> void:
+	for id in _category_buttons.keys():
+		var category: Dictionary = _find_category(id)
+		var active: bool = (id == _open_category)
+		if category.get("kind", "") == "tool":
+			active = (_current_tool == id)
+		_category_buttons[id].button_pressed = active
+
+func _find_category(id: StringName) -> Dictionary:
+	for category in CATEGORIES:
+		if category["id"] == id:
+			return category
+	return {}
+
+# ---------------------------------------------------------------------------
+# Left detail panel
+# ---------------------------------------------------------------------------
 
 func _build_left_panel() -> void:
 	_left_panel = PanelContainer.new()
@@ -317,6 +408,16 @@ func _unhandled_input(event: InputEvent) -> void:
 			_on_category_pressed(category["id"])
 			get_viewport().set_input_as_handled()
 			return
+	# R cycles the footprint of multi-tile basins.
+	if k == "R" and (_current_tool == &"reservoir" or _current_tool == &"cistern"):
+		BuildSystem.cycle_basin_size()
+		_desc_label.text = "[b]%s[/b]\nFootprint: %dx%d  (R to cycle)\n%s" % [
+			_tool_label(_current_tool),
+			BuildSystem.footprint_of(TOOL_STRUCTURE[_current_tool]).x,
+			BuildSystem.footprint_of(TOOL_STRUCTURE[_current_tool]).y,
+			_tool_desc(_current_tool)]
+		get_viewport().set_input_as_handled()
+		return
 	# Item hotkeys apply only while their category is open.
 	if _open_category != &"":
 		var category: Dictionary = _find_category(_open_category)
@@ -332,6 +433,15 @@ func _unhandled_input(event: InputEvent) -> void:
 ## doing nothing.
 func update_hint(tile_index: int) -> void:
 	if not _left_panel.visible:
+		return
+	if tile_index >= 0 and TERRAFORM_DELTA.has(_current_tool):
+		var delta: int = TERRAFORM_DELTA[_current_tool]
+		if WorldMap.can_terraform(tile_index, delta):
+			_hint_label.add_theme_color_override("font_color", Color(0.5, 0.85, 1.0))
+			_hint_label.text = "Level %d -> %d" % [WorldMap.height_level(tile_index), WorldMap.height_level(tile_index) + delta]
+		else:
+			_hint_label.add_theme_color_override("font_color", Color(1.0, 0.55, 0.45))
+			_hint_label.text = WorldMap.terraform_hint(tile_index, delta)
 		return
 	if tile_index < 0 or not TOOL_STRUCTURE.has(_current_tool):
 		_hint_label.text = ""

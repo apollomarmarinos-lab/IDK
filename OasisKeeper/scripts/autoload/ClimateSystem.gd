@@ -18,8 +18,17 @@ var _wind_time: float = 0.0
 var _air_moisture_next: PackedFloat32Array = PackedFloat32Array()
 var _neighbor_buf: PackedInt32Array = PackedInt32Array([0, 0, 0, 0])
 
-var _temperature_tick_counter: int = 0
-const TEMPERATURE_UPDATE_EVERY_N_TICKS: int = 2
+var _base_temperature: float = 20.0
+var _moisture_tick_counter: int = 0
+## Tiles carrying a shade structure. Maintained incrementally instead of
+## rescanning the whole map every tick just to find a handful of them.
+var _shade_structures: Dictionary = {}
+## Humidity diffusion is a whole-map pass and changes slowly, so it runs on
+## a stride rather than every tick.
+const MOISTURE_UPDATE_EVERY_N_TICKS: int = 3
+## Tiles of slack added around the active area for humidity diffusion, so the
+## humid plume can spread beyond the built area instead of stopping at it.
+const MOISTURE_MARGIN: int = 24
 
 func _ready() -> void:
 	_wind_noise_a.seed = randi()
@@ -27,22 +36,32 @@ func _ready() -> void:
 	_wind_noise_b.seed = randi()
 	_wind_noise_b.frequency = 1.0
 	EventBus.world_generated.connect(_on_world_generated)
+	EventBus.building_completed.connect(_on_building_completed)
+	EventBus.building_removed.connect(_on_building_removed)
 
 func _on_world_generated() -> void:
 	_air_moisture_next = WorldMap.air_moisture.duplicate()
+	_shade_structures.clear()
+
+func _on_building_completed(idx: int, _id: StringName) -> void:
+	if WorldMap.structure_type[idx] == WorldMap.Structure.SHADE_STRUCTURE:
+		_shade_structures[idx] = true
+
+func _on_building_removed(idx: int) -> void:
+	_shade_structures.erase(idx)
 
 func simulate_tick() -> void:
 	if WorldMap.width == 0:
 		return
 	_update_wind()
-	_temperature_tick_counter += 1
-	if _temperature_tick_counter >= TEMPERATURE_UPDATE_EVERY_N_TICKS:
-		_temperature_tick_counter = 0
-		_update_temperature()
+	_refresh_base_temperature()
 	_update_shade()
 	_evaporate_surface()
 	_evaporate_soil()
-	_diffuse_air_moisture()
+	_moisture_tick_counter += 1
+	if _moisture_tick_counter >= MOISTURE_UPDATE_EVERY_N_TICKS:
+		_moisture_tick_counter = 0
+		_diffuse_air_moisture()
 
 func _update_wind() -> void:
 	_wind_time += GameConfig.SIM_TICK_INTERVAL * 0.05
@@ -53,22 +72,27 @@ func _update_wind() -> void:
 	# between the two ranges), with gentle lateral drift.
 	wind_direction = Vector2(lateral, 1.0).normalized()
 
-func _update_temperature() -> void:
+## Temperature is DERIVED, not stored per tile.
+##
+## Writing it into an 86,400-entry array every few ticks cost more than every
+## other climate pass combined, and almost nobody read it: evaporation only
+## looks at wet tiles, plants only at their own tile, and the UI at one tile
+## under the cursor. Computing it on demand from the day/season base plus the
+## tile's own elevation, shade and wetness gives the identical number for a
+## fraction of the work.
+func _refresh_base_temperature() -> void:
 	var sun: float = GameClock.get_sun_curve()
 	var season: int = GameClock.season
-	var peak_temp: float = GameConfig.SEASON_BASE_TEMP[season]
-	var night_drop: float = GameConfig.SEASON_NIGHT_DROP[season]
-	var base_temp: float = peak_temp - night_drop * (1.0 - sun)
+	_base_temperature = GameConfig.SEASON_BASE_TEMP[season] \
+		- GameConfig.SEASON_NIGHT_DROP[season] * (1.0 - sun)
 
-	var w: int = WorldMap.width
-	var h: int = WorldMap.height
-	for i in range(w * h):
-		var t: float = base_temp
-		t -= WorldMap.elevation[i] * GameConfig.ELEVATION_LAPSE_RATE
-		t -= WorldMap.shade[i] * GameConfig.SHADE_COOLING
-		if WorldMap.water[i] > 0.5 or WorldMap.soil_moisture[i] > 1.0:
-			t -= GameConfig.WATER_COOLING
-		WorldMap.temperature[i] = t
+func temperature_at(idx: int) -> float:
+	var t: float = _base_temperature
+	t -= WorldMap.terrain_height(idx) * GameConfig.ELEVATION_LAPSE_RATE
+	t -= WorldMap.shade[idx] * GameConfig.SHADE_COOLING
+	if WorldMap.water[idx] > 0.5 or WorldMap.soil_moisture[idx] > 1.0:
+		t -= GameConfig.WATER_COOLING
+	return t
 
 func _update_shade() -> void:
 	WorldMap.shade.fill(0.0)
@@ -78,11 +102,8 @@ func _update_shade() -> void:
 		if canopy <= 0.0:
 			continue
 		_splat_shade(idx, plant.data.shade_radius, plant.data.shade_strength * canopy)
-	var w: int = WorldMap.width
-	var h: int = WorldMap.height
-	for i in range(w * h):
-		if WorldMap.structure_type[i] == WorldMap.Structure.SHADE_STRUCTURE:
-			_splat_shade(i, GameConfig.SHADE_STRUCTURE_RADIUS, GameConfig.SHADE_STRUCTURE_STRENGTH)
+	for idx in _shade_structures.keys():
+		_splat_shade(idx, GameConfig.SHADE_STRUCTURE_RADIUS, GameConfig.SHADE_STRUCTURE_STRENGTH)
 
 func _splat_shade(center_idx: int, radius: float, strength: float) -> void:
 	if radius <= 0.0 or strength <= 0.0:
@@ -106,7 +127,7 @@ func _splat_shade(center_idx: int, radius: float, strength: float) -> void:
 			WorldMap.shade[idx] = clampf(WorldMap.shade[idx] + strength * falloff, 0.0, 1.0)
 
 func _evaporation_multiplier(idx: int) -> float:
-	var temp_factor: float = clampf((WorldMap.temperature[idx] - 15.0) / 30.0, 0.05, 2.5)
+	var temp_factor: float = clampf((temperature_at(idx) - 15.0) / 30.0, 0.05, 2.5)
 	var wind_factor: float = 1.0 + wind_speed * GameConfig.WIND_EVAPORATION_FACTOR
 	var shade_factor: float = 1.0 - WorldMap.shade[idx] * GameConfig.SHADE_EVAPORATION_SUPPRESSION
 	var humidity_factor: float = 1.0 - WorldMap.air_moisture[idx] * GameConfig.HUMIDITY_EVAPORATION_SUPPRESSION
@@ -157,8 +178,14 @@ func _diffuse_air_moisture() -> void:
 	var wind_x: float = wind_direction.x * wind_speed * GameConfig.WIND_ADVECTION_STRENGTH
 	var wind_y: float = wind_direction.y * wind_speed * GameConfig.WIND_ADVECTION_STRENGTH
 
-	for y in range(h):
-		for x in range(w):
+	# Only sweep the area anything is actually happening in, plus a margin.
+	# Diffusing the empty desert at the far end of the map costs the same as
+	# diffusing the oasis and changes nothing anyone can see.
+	var region: Rect2i = _active_region()
+	if region.size.x <= 0 or region.size.y <= 0:
+		return
+	for y in range(region.position.y, region.position.y + region.size.y):
+		for x in range(region.position.x, region.position.x + region.size.x):
 			var idx: int = y * w + x
 			var value: float = src[idx]
 
@@ -182,6 +209,32 @@ func _diffuse_air_moisture() -> void:
 			value = maxf(0.0, value - GameConfig.AIR_MOISTURE_DECAY)
 			_air_moisture_next[idx] = value
 
-	var tmp: PackedFloat32Array = WorldMap.air_moisture
-	WorldMap.air_moisture = _air_moisture_next
-	_air_moisture_next = tmp
+	# Copy the region back rather than swapping buffers: outside the region
+	# _air_moisture_next holds stale values.
+	for y in range(region.position.y, region.position.y + region.size.y):
+		var row: int = y * w
+		for x in range(region.position.x, region.position.x + region.size.x):
+			WorldMap.air_moisture[row + x] = _air_moisture_next[row + x]
+
+## Bounding box of everything that generates or holds moisture, padded so the
+## plume has room to spread.
+func _active_region() -> Rect2i:
+	var min_x: int = WorldMap.width
+	var min_y: int = WorldMap.height
+	var max_x: int = -1
+	var max_y: int = -1
+	for source in [WaterSystem.get_active_tiles(), WaterSystem.get_moist_soil_tiles(), PlantSystem.plants]:
+		for idx in source.keys():
+			var x: int = idx % WorldMap.width
+			var y: int = idx / WorldMap.width
+			min_x = mini(min_x, x)
+			max_x = maxi(max_x, x)
+			min_y = mini(min_y, y)
+			max_y = maxi(max_y, y)
+	if max_x < 0:
+		return Rect2i(0, 0, 0, 0)
+	min_x = maxi(0, min_x - MOISTURE_MARGIN)
+	min_y = maxi(0, min_y - MOISTURE_MARGIN)
+	max_x = mini(WorldMap.width - 1, max_x + MOISTURE_MARGIN)
+	max_y = mini(WorldMap.height - 1, max_y + MOISTURE_MARGIN)
+	return Rect2i(min_x, min_y, max_x - min_x + 1, max_y - min_y + 1)

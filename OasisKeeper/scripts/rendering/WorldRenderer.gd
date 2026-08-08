@@ -28,6 +28,7 @@ var show_flow: bool = true
 var selected_tile: int = -1
 var hovered_tile: int = -1
 var ghost_structure: int = -1 ## structure the active build tool would place
+var drag_path: PackedInt32Array = PackedInt32Array() ## previewed L-shaped build run
 
 const T: float = float(GameConfig.TILE_PIXEL_SIZE)
 ## Screen pixels per grain texel. ~1.5 keeps the grain crisp but not noisy.
@@ -42,7 +43,11 @@ const WATER_DEEP := Color(0.09, 0.35, 0.62)
 const COVER_COLOR := Color(0.52, 0.47, 0.40)
 const COVER_LINE := Color(0.33, 0.30, 0.26)
 const ROCK_CUT_COLOR := Color(0.30, 0.28, 0.27)
+## How far a mature canopy may spill beyond its own tile.
+const CANOPY_OVERHANG: float = 1.45
 
+var _terrain_image: Image
+var _terrain_tex: ImageTexture
 var _moisture_data: PackedByteArray = PackedByteArray()
 var _shade_data: PackedByteArray = PackedByteArray()
 var _overlay_data: PackedByteArray = PackedByteArray()
@@ -70,6 +75,7 @@ func _ready() -> void:
 
 	EventBus.world_generated.connect(_on_world_generated)
 	EventBus.tile_changed.connect(_on_tile_changed)
+	EventBus.terrain_modified.connect(_on_terrain_modified)
 	for sig in [EventBus.plant_planted, EventBus.plant_removed, EventBus.plant_stage_changed]:
 		sig.connect(_on_plants_dirty)
 	EventBus.day_passed.connect(_on_plants_dirty)
@@ -92,8 +98,20 @@ func _setup_grain() -> void:
 	grain_sprite.scale = Vector2.ONE * GRAIN_SCALE
 	grain_sprite.region_enabled = true
 
+## Terracing changed a tile's height: repaint just that neighbourhood of the
+## baked terrain image rather than re-baking the whole map.
+func _on_terrain_modified(idx: int) -> void:
+	if _terrain_image == null or _terrain_tex == null:
+		return
+	var c: Vector2i = WorldMap.coords_of(idx)
+	TerrainBaker.repaint_tiles(_terrain_image, WorldMap.width, WorldMap.height, c.x, c.y)
+	_terrain_tex.update(_terrain_image)
+	structures_layer.queue_redraw()
+
 func _on_world_generated() -> void:
-	terrain_sprite.texture = ImageTexture.create_from_image(TerrainBaker.bake(WorldMap.width, WorldMap.height))
+	_terrain_image = TerrainBaker.bake(WorldMap.width, WorldMap.height)
+	_terrain_tex = ImageTexture.create_from_image(_terrain_image)
+	terrain_sprite.texture = _terrain_tex
 	# Region larger than the texture + repeat enabled == tiled fill.
 	grain_sprite.region_rect = Rect2(0, 0,
 		float(WorldMap.width) * T / GRAIN_SCALE,
@@ -134,6 +152,10 @@ func set_hovered_tile(idx: int) -> void:
 	hovered_tile = idx
 	selection_layer.queue_redraw()
 
+func set_drag_path(path: PackedInt32Array) -> void:
+	drag_path = path
+	selection_layer.queue_redraw()
+
 # ---------------------------------------------------------------------------
 # Data-layer images
 # ---------------------------------------------------------------------------
@@ -147,6 +169,10 @@ func _refresh() -> void:
 		flow_layer.queue_redraw()
 
 func _rebuild_data_images() -> void:
+	# Only pay for the overlay pass when an overlay is actually showing; on a
+	# large map this is a whole extra sweep over every tile, five times a
+	# second, for pixels nobody sees.
+	var overlay_on: bool = overlay_mode != Overlay.NONE
 	var size: int = WorldMap.width * WorldMap.height
 	for i in range(size):
 		var o: int = i * 4
@@ -165,14 +191,16 @@ func _rebuild_data_images() -> void:
 		_shade_data[o + 2] = 34
 		_shade_data[o + 3] = int(clampf(sh, 0.0, 1.0) * 120.0)
 
-		_write_overlay_pixel(i, o)
+		if overlay_on:
+			_write_overlay_pixel(i, o)
 
 	var w: int = WorldMap.width
 	var h: int = WorldMap.height
 	_moisture_tex = _update_texture(_moisture_tex, moisture_sprite, w, h, _moisture_data)
 	_shade_tex = _update_texture(_shade_tex, shade_sprite, w, h, _shade_data)
-	_overlay_tex = _update_texture(_overlay_tex, overlay_sprite, w, h, _overlay_data)
-	overlay_sprite.visible = overlay_mode != Overlay.NONE
+	if overlay_on:
+		_overlay_tex = _update_texture(_overlay_tex, overlay_sprite, w, h, _overlay_data)
+	overlay_sprite.visible = overlay_on
 
 func _write_overlay_pixel(i: int, o: int) -> void:
 	var r: int = 0
@@ -371,24 +399,48 @@ func _draw_gate(layer: Node2D, idx: int, x: int, y: int) -> void:
 	else:
 		layer.draw_rect(Rect2(ox + c - T * 0.42, oy + c - T * 0.1, T * 0.84, T * 0.2), Color(0.75, 0.28, 0.24))
 
+## A basin tile. Because a basin is several tiles, each one draws edge-to-edge
+## and only puts a bank on the sides that face outside the footprint, so the
+## whole thing reads as one pool rather than a grid of little ponds.
 func _draw_basin(layer: Node2D, idx: int, x: int, y: int, covered: bool) -> void:
 	var ox: float = float(x) * T
 	var oy: float = float(y) * T
-	var inset: float = T * 0.08
-	var full := Rect2(ox + inset, oy + inset, T - inset * 2.0, T - inset * 2.0)
+	var full := Rect2(ox, oy, T, T)
 	layer.draw_rect(full, Color(0.30, 0.26, 0.21))
-	layer.draw_rect(full, Color(0.16, 0.13, 0.10), false, maxf(1.0, T * 0.06))
+
 	var fill: float = _fill_fraction(idx)
 	if fill > 0.01:
-		# A basin fills from the middle outward, area scaling with volume.
-		var k: float = sqrt(fill)
-		var iw: float = (T - inset * 2.0) * k
-		layer.draw_rect(Rect2(ox + T * 0.5 - iw * 0.5, oy + T * 0.5 - iw * 0.5, iw, iw), _water_color(fill))
+		# Water fills the tile completely; depth is read from colour, so the
+		# surface stays continuous across the footprint.
+		var wc: Color = _water_color(fill)
+		wc.a = 0.45 + 0.55 * fill
+		layer.draw_rect(full, wc)
+
 	if covered:
-		var lid := Color(0.52, 0.47, 0.40, 0.85)
-		layer.draw_rect(full, lid)
-		layer.draw_line(full.position, full.position + full.size, COVER_LINE, maxf(1.0, T * 0.05))
-		layer.draw_line(Vector2(full.position.x + full.size.x, full.position.y), Vector2(full.position.x, full.position.y + full.size.y), COVER_LINE, maxf(1.0, T * 0.05))
+		layer.draw_rect(full, Color(0.52, 0.47, 0.40, 0.85))
+
+	# Bank on every side that leaves the footprint, with inlets left open.
+	var owner: int = WorldMap.structure_owner[idx]
+	var bank := Color(0.16, 0.13, 0.10)
+	var w: float = maxf(1.5, T * 0.09)
+	for dir in [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]:
+		var nx: int = x + dir.x
+		var ny: int = y + dir.y
+		var outside: bool = true
+		if WorldMap.in_bounds(nx, ny):
+			outside = WorldMap.structure_owner[WorldMap.index_of(nx, ny)] != owner
+		if not outside:
+			continue
+		var open_side: bool = WorldMap.is_inlet[idx] == 1
+		var col: Color = Color(0.30, 0.75, 0.85) if open_side else bank
+		if dir == Vector2i(1, 0):
+			layer.draw_rect(Rect2(ox + T - w, oy, w, T), col)
+		elif dir == Vector2i(-1, 0):
+			layer.draw_rect(Rect2(ox, oy, w, T), col)
+		elif dir == Vector2i(0, 1):
+			layer.draw_rect(Rect2(ox, oy + T - w, T, w), col)
+		else:
+			layer.draw_rect(Rect2(ox, oy, T, w), col)
 
 func _draw_well(layer: Node2D, idx: int, x: int, y: int) -> void:
 	var center := Vector2(float(x) * T + T * 0.5, float(y) * T + T * 0.5)
@@ -460,18 +512,31 @@ func _draw_plants() -> void:
 		return
 	var layer: Node2D = plants_layer
 	var r: Rect2i = _visible_tile_rect(layer)
+	# A plant owns exactly one tile but its canopy may overhang its
+	# neighbours, so drawing has to be sorted back-to-front by row -- an
+	# unsorted pass lets a tree behind overlap one in front of it.
+	# The margin picks up plants just off-screen whose canopy still reaches in.
+	var visible: Array[int] = []
 	for idx in PlantSystem.plants.keys():
 		var x: int = idx % WorldMap.width
 		var y: int = idx / WorldMap.width
-		if x < r.position.x or x > r.position.x + r.size.x or y < r.position.y or y > r.position.y + r.size.y:
+		if x < r.position.x - 2 or x > r.position.x + r.size.x + 2:
 			continue
-		var p: PlantInstance = PlantSystem.plants[idx]
-		_draw_plant(layer, p, x, y)
+		if y < r.position.y - 2 or y > r.position.y + r.size.y + 2:
+			continue
+		visible.append(idx)
+	visible.sort_custom(func(a, b): return (a / WorldMap.width) < (b / WorldMap.width))
+	for idx in visible:
+		_draw_plant(layer, PlantSystem.plants[idx], idx % WorldMap.width, idx / WorldMap.width)
 
 func _draw_plant(layer: Node2D, p: PlantInstance, x: int, y: int) -> void:
-	var center := Vector2(float(x) * T + T * 0.5, float(y) * T + T * 0.5)
+	# Anchored slightly below the tile centre so a tall canopy grows upward
+	# out of its own tile, the way overhanging sprites read in RimWorld.
+	var center := Vector2(float(x) * T + T * 0.5, float(y) * T + T * 0.62)
 	var growth: float = p.get_growth_fraction()
-	var s: float = T * 0.5 * lerpf(0.3, p.data.mature_scale, growth)
+	# CANOPY_OVERHANG > 1 lets a mature tree spill past its own tile onto its
+	# neighbours. The plant still occupies exactly one tile for simulation.
+	var s: float = T * 0.5 * lerpf(0.3, p.data.mature_scale * CANOPY_OVERHANG, growth)
 	# Sick plants brown off toward straw colour.
 	var col: Color = p.data.color.lerp(Color(0.58, 0.45, 0.24), 1.0 - p.health)
 	var dark: Color = col.darkened(0.35)
@@ -516,10 +581,48 @@ func _draw_plant(layer: Node2D, p: PlantInstance, x: int, y: int) -> void:
 # Cursor / selection
 # ---------------------------------------------------------------------------
 
+## A chevron pointing up the step, drawn on a previewed route tile that sits
+## higher than the one before it -- the point where the water would stop.
+func _draw_step_up_marker(layer: Node2D, px: int, py: int) -> void:
+	var o := Vector2(float(px) * T, float(py) * T)
+	layer.draw_rect(Rect2(o.x, o.y, T, T), Color(0.98, 0.55, 0.15, 0.42))
+	var c: Color = Color(1.0, 0.85, 0.35)
+	var w: float = maxf(2.0, T * 0.07)
+	layer.draw_line(o + Vector2(T * 0.28, T * 0.62), o + Vector2(T * 0.5, T * 0.34), c, w)
+	layer.draw_line(o + Vector2(T * 0.72, T * 0.62), o + Vector2(T * 0.5, T * 0.34), c, w)
+
 func _draw_selection() -> void:
 	if WorldMap.width == 0:
 		return
 	var layer: Node2D = selection_layer
+
+	# Preview of an L-shaped build run: each tile shows whether it would
+	# actually take the structure, so a blocked route is obvious before
+	# committing to it.
+	for i in range(drag_path.size()):
+		var idx: int = drag_path[i]
+		var px: int = idx % WorldMap.width
+		var py: int = idx / WorldMap.width
+		var ok: bool = ghost_structure < 0 or BuildSystem.can_place(idx, ghost_structure)
+		var fill: Color = Color(0.35, 0.95, 0.45, 0.30) if ok else Color(0.95, 0.3, 0.25, 0.30)
+		layer.draw_rect(Rect2(float(px) * T, float(py) * T, T, T), fill)
+		# Water will not climb, so a run is only useful if it never steps up.
+		# Marking the rises while the route is still a preview is the whole
+		# difference between "my canal is broken" and "grade those two tiles".
+		if i > 0 and WorldMap.height_level(idx) > WorldMap.height_level(drag_path[i - 1]):
+			_draw_step_up_marker(layer, px, py)
+	# Multi-tile buildings preview their whole footprint, not just the cursor
+	# tile, so it is clear how much room they need before committing.
+	if hovered_tile >= 0 and ghost_structure >= 0:
+		var fp: Vector2i = BuildSystem.footprint_of(ghost_structure)
+		if fp != Vector2i.ONE:
+			var hc: Vector2i = WorldMap.coords_of(hovered_tile)
+			var ok_all: bool = BuildSystem.can_place(hovered_tile, ghost_structure)
+			var tint: Color = Color(0.35, 0.95, 0.45, 0.25) if ok_all else Color(0.95, 0.3, 0.25, 0.25)
+			layer.draw_rect(Rect2(float(hc.x) * T, float(hc.y) * T, float(fp.x) * T, float(fp.y) * T), tint)
+			layer.draw_rect(Rect2(float(hc.x) * T, float(hc.y) * T, float(fp.x) * T, float(fp.y) * T),
+				Color(tint.r, tint.g, tint.b, 0.95), false, maxf(1.5, T * 0.06))
+
 	if hovered_tile >= 0:
 		var x: int = hovered_tile % WorldMap.width
 		var y: int = hovered_tile / WorldMap.width
