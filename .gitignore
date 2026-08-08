@@ -1,41 +1,20 @@
 ```
 # Godot-specific ignores
 *.import
-*.remap
-export_presets.cfg
-.mobile_importer/
-.editor/
-.vs/
-.vscode/
+*.uid
+.project
+.user
+.scn
+.res
+.gd
 
 # Build artifacts
-*.exe
-*.dll
-*.so
-*.dylib
-*.pdb
-*.ilk
+export_presets.cfg
 
 # Dependencies
-*.gdns
-*.gdnlib
-*.tres
-*.res
+.addons/
 
-# Logs
-*.log
-
-# Temporary files
+# Temp files
 *.tmp
-*.temp
-*.backup
-
-# Environment
-.env
-.env.local
-*.env.*
-
-# OS specific
-.DS_Store
-Thumbs.db
+*.log
 ```
