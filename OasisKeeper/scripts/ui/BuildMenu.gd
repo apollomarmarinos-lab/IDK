@@ -54,11 +54,21 @@ const CATEGORIES: Array = [
 		],
 	},
 	{
-		"id": &"plants", "label": "Plants", "key": "5", "kind": "plants",
+		"id": &"terraform", "label": "Terraform", "key": "5", "kind": "category",
+		"blurb": "Reshape the valley floor a level at a time.",
+		"tools": [
+			{"id": &"raise_ground", "label": "Raise Ground", "key": "Q",
+			 "desc": "Builds the tile up by one height level.\n\nUse it to dam a hollow, or to force a channel to run somewhere else -- water will not climb a rise."},
+			{"id": &"lower_ground", "label": "Dig Out", "key": "W",
+			 "desc": "Cuts the tile down by one height level.\n\nThe practical use is grade: dig a line of tiles descending away from your source and an open canal laid along it will actually carry water, instead of pooling where the ground flattens."},
+		],
+	},
+	{
+		"id": &"plants", "label": "Plants", "key": "6", "kind": "plants",
 		"blurb": "Pick a species, then click ground to plant it.",
 	},
 	{
-		"id": &"overlays", "label": "Overlays", "key": "6", "kind": "overlays",
+		"id": &"overlays", "label": "Overlays", "key": "7", "kind": "overlays",
 		"blurb": "Reveal what the map hides. Aquifers are invisible without this.",
 	},
 	{
@@ -85,6 +95,12 @@ const TOOL_STRUCTURE := {
 	&"cistern": Tiles.Structure.CISTERN,
 	&"well": Tiles.Structure.WELL,
 	&"shade_structure": Tiles.Structure.SHADE_STRUCTURE,
+}
+
+## Terraform tools, mapped to the number of levels they move the ground.
+const TERRAFORM_DELTA := {
+	&"raise_ground": 1,
+	&"lower_ground": -1,
 }
 
 const ACCENT := Color(0.97, 0.84, 0.52)
@@ -407,6 +423,15 @@ func _unhandled_input(event: InputEvent) -> void:
 ## doing nothing.
 func update_hint(tile_index: int) -> void:
 	if not _left_panel.visible:
+		return
+	if tile_index >= 0 and TERRAFORM_DELTA.has(_current_tool):
+		var delta: int = TERRAFORM_DELTA[_current_tool]
+		if WorldMap.can_terraform(tile_index, delta):
+			_hint_label.add_theme_color_override("font_color", Color(0.5, 0.85, 1.0))
+			_hint_label.text = "Level %d -> %d" % [WorldMap.height_level(tile_index), WorldMap.height_level(tile_index) + delta]
+		else:
+			_hint_label.add_theme_color_override("font_color", Color(1.0, 0.55, 0.45))
+			_hint_label.text = WorldMap.terraform_hint(tile_index, delta)
 		return
 	if tile_index < 0 or not TOOL_STRUCTURE.has(_current_tool):
 		_hint_label.text = ""

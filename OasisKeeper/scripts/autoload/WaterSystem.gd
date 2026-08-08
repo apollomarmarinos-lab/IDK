@@ -19,7 +19,12 @@ extends Node
 ## Net movement per tile is accumulated into flow_x/flow_y so the renderer
 ## can draw arrows and the player can *see* which way the water is going.
 
-var _active: Dictionary = {} # idx(int) -> true, every tile with a water structure
+var _active: Dictionary = {} # idx(int) -> true, tiles currently worth simulating
+## Tiles that draw water from the world: mountain canals sitting on an
+## aquifer, and wells over groundwater. Evaluated when the structure is
+## built rather than every tick, and these never go to sleep -- they are
+## what refills a network that has run dry.
+var _sources: Dictionary = {} # idx(int) -> true
 var _moist_soil: Dictionary = {} # idx(int) -> true, tiles with soil_moisture > epsilon
 
 var _neighbor_buf: PackedInt32Array = PackedInt32Array([0, 0, 0, 0])
@@ -31,9 +36,11 @@ const WATER_EPSILON: float = 0.005
 
 func _ready() -> void:
 	EventBus.world_generated.connect(_on_world_generated)
+	EventBus.terrain_modified.connect(_on_terrain_modified)
 
 func _on_world_generated() -> void:
 	_active.clear()
+	_sources.clear()
 	_moist_soil.clear()
 	var size: int = WorldMap.width * WorldMap.height
 	_flow_accum_x = PackedFloat32Array()
@@ -43,12 +50,38 @@ func _on_world_generated() -> void:
 
 func register_structure(idx: int) -> void:
 	if WorldMap.structure_type[idx] == WorldMap.Structure.NONE:
-		_active.erase(idx)
+		unregister_structure(idx)
+		return
+	_active[idx] = true
+	if _has_water_access(idx):
+		_sources[idx] = true
 	else:
-		_active[idx] = true
+		_sources.erase(idx)
 
 func unregister_structure(idx: int) -> void:
 	_active.erase(idx)
+	_sources.erase(idx)
+
+## Whether this structure can draw water from the world. Checked once when
+## the structure is built, not every tick.
+func _has_water_access(idx: int) -> bool:
+	var s: int = WorldMap.structure_type[idx]
+	if s == WorldMap.Structure.CANAL_MOUNTAIN:
+		return WorldMap.has_aquifer(idx)
+	if s == WorldMap.Structure.WELL:
+		return WorldMap.rare_groundwater[idx] > 0.0
+	return false
+
+## Terracing changes hydraulic head, so anything sleeping around the edited
+## tile has to be reconsidered.
+func _on_terrain_modified(idx: int) -> void:
+	if WorldMap.structure_type[idx] != WorldMap.Structure.NONE:
+		_active[idx] = true
+	var count: int = WorldMap.get_neighbors4(idx, _neighbor_buf)
+	for n in range(count):
+		var nidx: int = _neighbor_buf[n]
+		if WorldMap.structure_type[nidx] != WorldMap.Structure.NONE:
+			_active[nidx] = true
 
 func toggle_gate(idx: int) -> void:
 	if WorldMap.structure_type[idx] != WorldMap.Structure.GATE:
@@ -76,8 +109,9 @@ func _recharge_aquifers() -> void:
 ## rare valley groundwater. Both are rate-limited, and an aquifer that is
 ## running low yields proportionally less.
 func _tap_sources() -> void:
-	for idx in _active.keys():
+	for idx in _sources.keys():
 		var idx_i: int = idx
+		_active[idx_i] = true # a source is never idle
 		var s: int = WorldMap.structure_type[idx_i]
 		var cap: float = WorldMap.water_capacity(idx_i)
 		var room: float = cap - WorldMap.water[idx_i]
@@ -100,84 +134,92 @@ func _tap_sources() -> void:
 				continue
 			WorldMap.water[idx_i] += minf(GameConfig.WELL_RECHARGE_RATE * yield_frac, room)
 
+## Moves water one tick.
+##
+## Each tile with water finds every connected neighbour whose water *surface*
+## sits lower than its own, and pushes out at most FLOW_RATE, split between
+## them in proportion to how much lower each one is. So a channel that forks
+## feeds both forks, weighted by pressure, instead of the whole flow picking
+## a single downstream tile.
+##
+## Two details that matter:
+##
+##  - A transfer is capped at FLOW_EQUALISE_CAP of the head difference.
+##    Water raises the receiving surface as it drops the donating one, so
+##    moving more than half the difference overshoots level and the pair
+##    ping-pongs water back and forth forever.
+##  - Tiles that are dry and have no source go to sleep, and are woken again
+##    only when a neighbour pushes water into them. On a large network the
+##    great majority of tiles are idle at any moment.
 func _flow_pass() -> void:
 	_flow_accum_x.fill(0.0)
 	_flow_accum_y.fill(0.0)
-	
-	# Build a list of active conducting tiles
-	var conducting_tiles: Array[int] = []
+
+	var to_sleep: Array[int] = []
+	var targets := PackedInt32Array()
+	var diffs := PackedFloat32Array()
+
 	for idx in _active.keys():
 		var idx_i: int = idx
-		if WorldMap.conducts_water(idx_i):
-			conducting_tiles.append(idx_i)
-	
-	# For each conducting tile, find the downstream neighbor (lowest head)
-	# and record the flow direction
-	var flow_targets: Dictionary = {} # idx -> downstream_idx
-	
-	for idx_i in conducting_tiles:
-		var head_a: float = WorldMap.head(idx_i)
+		if not WorldMap.conducts_water(idx_i):
+			continue
+		if WorldMap.water[idx_i] <= WATER_EPSILON:
+			# Dry, and nothing feeds it: stop paying for this tile.
+			if not _sources.has(idx_i):
+				to_sleep.append(idx_i)
+			continue
+
+		var self_head: float = WorldMap.head(idx_i)
+		targets.clear()
+		diffs.clear()
+		var total_diff: float = 0.0
+
 		var count: int = WorldMap.get_neighbors4(idx_i, _neighbor_buf)
-		var best_neighbor: int = -1
-		var best_head: float = head_a
-		
 		for n in range(count):
 			var nidx: int = _neighbor_buf[n]
-			if not _active.has(nidx) or not WorldMap.conducts_water(nidx):
+			# Deliberately tested against the structure, NOT against the
+			# active set: a sleeping tile is exactly the one we need to be
+			# able to push water into, and excluding it would mean a dry
+			# network could never be woken again.
+			if not WorldMap.conducts_water(nidx):
 				continue
-			var neighbor_head: float = WorldMap.head(nidx)
-			# Find the neighbor with the lowest head (downstream)
-			if neighbor_head < best_head:
-				best_head = neighbor_head
-				best_neighbor = nidx
-		
-		if best_neighbor >= 0:
-			flow_targets[idx_i] = best_neighbor
-	
-	# Now process flows from upstream to downstream
-	# We need to sort tiles so we process upstream tiles first
-	# Use a simple approach: iterate multiple times to propagate water
-	var max_iterations: int = conducting_tiles.size()
-	for iteration in range(max_iterations):
-		var any_flow: bool = false
-		
-		for idx_i in conducting_tiles:
-			if not flow_targets.has(idx_i):
+			if WorldMap.water[nidx] >= WorldMap.water_capacity(nidx):
 				continue
-			
-			var downstream_idx: int = flow_targets[idx_i]
-			
-			# Check if upstream tile has water to give
-			if WorldMap.water[idx_i] <= GameConfig.MIN_FLOW_EPSILON:
+			var diff: float = self_head - WorldMap.head(nidx)
+			if diff <= GameConfig.MIN_FLOW_EPSILON:
 				continue
-			
-			# Check if downstream tile has room
-			var downstream_room: float = WorldMap.water_capacity(downstream_idx) - WorldMap.water[downstream_idx]
-			if downstream_room <= GameConfig.MIN_FLOW_EPSILON:
+			targets.append(nidx)
+			diffs.append(diff)
+			total_diff += diff
+
+		if targets.is_empty() or total_diff <= 0.0:
+			continue
+
+		var budget: float = minf(GameConfig.FLOW_RATE, WorldMap.water[idx_i])
+		for t in range(targets.size()):
+			var nidx: int = targets[t]
+			var share: float = diffs[t] / total_diff
+			var amount: float = budget * share
+			amount = minf(amount, diffs[t] * GameConfig.FLOW_EQUALISE_CAP)
+			amount = minf(amount, WorldMap.water_capacity(nidx) - WorldMap.water[nidx])
+			amount = minf(amount, WorldMap.water[idx_i])
+			if amount <= GameConfig.MIN_FLOW_EPSILON:
 				continue
-			
-			# Transfer water at a fixed rate
-			var transfer: float = minf(GameConfig.FLOW_RATE, WorldMap.water[idx_i])
-			transfer = minf(transfer, downstream_room)
-			
-			if transfer <= GameConfig.MIN_FLOW_EPSILON:
-				continue
-			
-			WorldMap.water[idx_i] -= transfer
-			WorldMap.water[downstream_idx] += transfer
-			any_flow = true
-			
-			# Record the flow direction for visualization
-			var dx: int = (downstream_idx % WorldMap.width) - (idx_i % WorldMap.width)
-			var dy: int = (downstream_idx / WorldMap.width) - (idx_i / WorldMap.width)
-			_flow_accum_x[idx_i] += float(dx) * transfer
-			_flow_accum_y[idx_i] += float(dy) * transfer
-			_flow_accum_x[downstream_idx] += float(dx) * transfer
-			_flow_accum_y[downstream_idx] += float(dy) * transfer
-		
-		if not any_flow:
-			break
-	
+
+			WorldMap.water[idx_i] -= amount
+			WorldMap.water[nidx] += amount
+			_active[nidx] = true # a sleeping tile that receives water wakes up
+
+			var dx: int = (nidx % WorldMap.width) - (idx_i % WorldMap.width)
+			var dy: int = (nidx / WorldMap.width) - (idx_i / WorldMap.width)
+			_flow_accum_x[idx_i] += float(dx) * amount
+			_flow_accum_y[idx_i] += float(dy) * amount
+			_flow_accum_x[nidx] += float(dx) * amount
+			_flow_accum_y[nidx] += float(dy) * amount
+
+	for idx in to_sleep:
+		_active.erase(idx)
+
 	# Smooth the arrows so they don't jitter frame to frame.
 	var k: float = GameConfig.FLOW_VECTOR_SMOOTHING
 	for idx in _active.keys():

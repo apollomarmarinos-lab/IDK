@@ -35,7 +35,11 @@ func _process(_delta: float) -> void:
 	var c: Vector2i = WorldMap.coords_of(idx)
 	var lines: Array[String] = []
 	lines.append("[b]Tile (%d, %d)[/b]" % [c.x, c.y])
-	lines.append("%s   elev %.1f" % [WorldMap.terrain_name(idx), WorldMap.elevation[idx]])
+	var level_txt: String = "level %d" % WorldMap.height_level(idx)
+	var offset: int = WorldMap.terraform_offset[idx]
+	if offset != 0:
+		level_txt += " [color=#ffd24d](%s%d terraced)[/color]" % ["+" if offset > 0 else "", offset]
+	lines.append("%s   %s" % [WorldMap.terrain_name(idx), level_txt])
 	if WorldMap.fertility[idx] > 0.0:
 		lines.append("Fertility: %.0f%%" % (WorldMap.fertility[idx] * 100.0))
 	lines.append("%.1f C   Shade %.0f%%   Humidity %.0f%%" % [

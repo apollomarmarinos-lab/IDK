@@ -140,6 +140,60 @@ func _report_world_stats() -> void:
 	for o in WorldMap.oases:
 		oasis_list.append(str(WorldMap.coords_of(o)))
 	print("SELFTEST oases: %d at %s" % [WorldMap.oases.size(), ", ".join(oasis_list)])
+	_test_terraform()
+
+## Exercises height levels and terracing: a valley tile should raise and dig,
+## rock and foothills should refuse.
+func _test_terraform() -> void:
+	var valley: int = -1
+	var rock: int = -1
+	var scree: int = -1
+	for i in range(WorldMap.width * WorldMap.height):
+		if valley < 0 and WorldMap.terrain_type[i] == WorldMap.Terrain.DUNE_SAND:
+			valley = i
+		elif rock < 0 and WorldMap.terrain_type[i] == WorldMap.Terrain.ROCK:
+			rock = i
+		elif scree < 0 and WorldMap.terrain_type[i] == WorldMap.Terrain.SCREE:
+			scree = i
+		if valley >= 0 and rock >= 0 and scree >= 0:
+			break
+
+	if valley >= 0:
+		var before: int = WorldMap.height_level(valley)
+		var raised: bool = WorldMap.apply_terraform(valley, 1)
+		var after_raise: int = WorldMap.height_level(valley)
+		WorldMap.apply_terraform(valley, -2)
+		var after_dig: int = WorldMap.height_level(valley)
+		print("SELFTEST terraform valley %s: ok=%s level %d -> %d -> %d" % [
+			WorldMap.coords_of(valley), raised, before, after_raise, after_dig])
+		# Walk it to the raise limit and confirm the clamp holds.
+		var guard: int = 0
+		while WorldMap.apply_terraform(valley, 1) and guard < 100:
+			guard += 1
+		print("SELFTEST terraform clamp: offset=%d (max %d), refused=%s" % [
+			WorldMap.terraform_offset[valley], GameConfig.TERRAFORM_MAX_RAISE,
+			WorldMap.terraform_hint(valley, 1)])
+	# Terrace a visible staircase beside the first oasis so the repaint path
+	# gets exercised and the result can be eyeballed in a screenshot.
+	if not WorldMap.oases.is_empty():
+		var o: Vector2i = WorldMap.coords_of(WorldMap.oases[0])
+		var applied: int = 0
+		for step in range(-6, 7):
+			for band in range(-3, 4):
+				var tx: int = o.x + step
+				var ty: int = o.y + 14 + band
+				if not WorldMap.in_bounds(tx, ty):
+					continue
+				var levels: int = step # a ramp from -6 up to +6
+				var tidx: int = WorldMap.index_of(tx, ty)
+				if WorldMap.can_terraform(tidx, levels) and WorldMap.apply_terraform(tidx, levels):
+					applied += 1
+		print("SELFTEST terraced staircase near oasis: %d tiles" % applied)
+
+	if rock >= 0:
+		print("SELFTEST terraform rock refused: '%s'" % WorldMap.terraform_hint(rock, 1))
+	if scree >= 0:
+		print("SELFTEST terraform foothill refused: '%s'" % WorldMap.terraform_hint(scree, -1))
 
 func _process(_delta: float) -> void:
 	_frame += 1

@@ -35,6 +35,79 @@ const GRAIN_TEXTURE_SIZE: int = 256
 const HILLSHADE_STRENGTH: float = 0.24
 const HILLSHADE_LIGHT := Vector2(-0.7, -0.7) ## sun from the north-west
 
+## Repaints a small square of the baked terrain image in place, for when the
+## player terraces a tile. Re-baking the whole map costs about a second at
+## this size, which would be a visible hitch on every click; a local repaint
+## is imperceptible. The margin covers the neighbours whose hillshade depends
+## on the edited tile's height.
+static func repaint_tiles(img: Image, width: int, height: int, cx: int, cy: int, margin: int = 2) -> void:
+	var detail: int = GameConfig.TERRAIN_DETAIL
+	var rock_noise := _make_rock_noise()
+	var x0: int = maxi(0, cx - margin)
+	var x1: int = mini(width - 1, cx + margin)
+	var y0: int = maxi(0, cy - margin)
+	var y1: int = mini(height - 1, cy + margin)
+	for ty in range(y0, y1 + 1):
+		for tx in range(x0, x1 + 1):
+			var c: Color = _tile_colour(width, height, tx, ty)
+			var rough: float = _tile_roughness(ty * width + tx)
+			for sy in range(detail):
+				for sx in range(detail):
+					var px: int = tx * detail + sx
+					var py: int = ty * detail + sy
+					var n: float = rock_noise.get_noise_2d(float(px), float(py)) * rough * 0.20
+					img.set_pixel(px, py, Color(
+						clampf(c.r + n, 0.0, 1.0),
+						clampf(c.g + n, 0.0, 1.0),
+						clampf(c.b + n, 0.0, 1.0)))
+
+static func _make_rock_noise() -> FastNoiseLite:
+	var n := FastNoiseLite.new()
+	n.seed = 4242
+	n.noise_type = FastNoiseLite.TYPE_CELLULAR
+	n.frequency = 0.10
+	n.cellular_return_type = FastNoiseLite.RETURN_DISTANCE2_SUB
+	return n
+
+static func _tile_roughness(idx: int) -> float:
+	match WorldMap.terrain_type[idx]:
+		Tiles.Terrain.ROCK:
+			return 1.0
+		Tiles.Terrain.SCREE:
+			return 0.7
+		Tiles.Terrain.ALLUVIUM:
+			return 0.25
+		_:
+			return 0.35
+
+## Flat material colour for one tile, with elevation tint, per-tile jitter
+## and hillshade applied. Shared by the full bake and the local repaint.
+static func _tile_colour(width: int, height: int, x: int, y: int) -> Color:
+	var idx: int = y * width + x
+	var c: Color = TERRAIN_BASE_COLORS[WorldMap.terrain_type[idx]]
+	if WorldMap.terrain_type[idx] == Tiles.Terrain.ALLUVIUM:
+		c = c.lerp(Color(0.54, 0.44, 0.28), WorldMap.wadi_strength[idx] * 0.5)
+	var elev_norm: float = clampf(WorldMap.terrain_height(idx) / GameConfig.MOUNTAIN_HEIGHT_SCALE, 0.0, 1.0)
+	c = c.lerp(Color(0.86, 0.84, 0.80), elev_norm * 0.25)
+
+	var j: float = _tile_jitter(x, y) * 0.016
+	c.r += j
+	c.g += j
+	c.b += j
+
+	var sh: float = _hillshade(width, height, x, y)
+	if sh > 0.0:
+		var k: float = sh * 0.45
+		c.r += (1.00 - c.r) * k
+		c.g += (0.98 - c.g) * k
+		c.b += (0.90 - c.b) * k
+	else:
+		var k2: float = -sh * 0.50
+		c.r += (0.20 - c.r) * k2
+		c.g += (0.17 - c.g) * k2
+		c.b += (0.19 - c.b) * k2
+	return c
+
 static func bake(width: int, height: int) -> Image:
 	var detail: int = GameConfig.TERRAIN_DETAIL
 	var size: int = width * height
@@ -50,7 +123,7 @@ static func bake(width: int, height: int) -> Image:
 		var c: Color = TERRAIN_BASE_COLORS[WorldMap.terrain_type[idx]]
 		if WorldMap.terrain_type[idx] == Tiles.Terrain.ALLUVIUM:
 			c = c.lerp(Color(0.54, 0.44, 0.28), WorldMap.wadi_strength[idx] * 0.5)
-		var elev_norm: float = clampf(WorldMap.elevation[idx] / GameConfig.MOUNTAIN_HEIGHT_SCALE, 0.0, 1.0)
+		var elev_norm: float = clampf(WorldMap.terrain_height(idx) / GameConfig.MOUNTAIN_HEIGHT_SCALE, 0.0, 1.0)
 		c = c.lerp(Color(0.86, 0.84, 0.80), elev_norm * 0.25)
 		cr[idx] = c.r
 		cg[idx] = c.g
@@ -206,7 +279,7 @@ static func _hillshade(width: int, height: int, x: int, y: int) -> float:
 	var xr: int = mini(width - 1, x + 1)
 	var yu: int = maxi(0, y - 1)
 	var yd: int = mini(height - 1, y + 1)
-	var dzdx: float = (WorldMap.elevation[y * width + xr] - WorldMap.elevation[y * width + xl]) * 0.5
-	var dzdy: float = (WorldMap.elevation[yd * width + x] - WorldMap.elevation[yu * width + x]) * 0.5
+	var dzdx: float = (WorldMap.terrain_height(y * width + xr) - WorldMap.terrain_height(y * width + xl)) * 0.5
+	var dzdy: float = (WorldMap.terrain_height(yd * width + x) - WorldMap.terrain_height(yu * width + x)) * 0.5
 	var lit: float = dzdx * HILLSHADE_LIGHT.x + dzdy * HILLSHADE_LIGHT.y
 	return clampf(lit * HILLSHADE_STRENGTH, -1.0, 1.0)

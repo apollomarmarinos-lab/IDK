@@ -43,6 +43,8 @@ const COVER_COLOR := Color(0.52, 0.47, 0.40)
 const COVER_LINE := Color(0.33, 0.30, 0.26)
 const ROCK_CUT_COLOR := Color(0.30, 0.28, 0.27)
 
+var _terrain_image: Image
+var _terrain_tex: ImageTexture
 var _moisture_data: PackedByteArray = PackedByteArray()
 var _shade_data: PackedByteArray = PackedByteArray()
 var _overlay_data: PackedByteArray = PackedByteArray()
@@ -70,6 +72,7 @@ func _ready() -> void:
 
 	EventBus.world_generated.connect(_on_world_generated)
 	EventBus.tile_changed.connect(_on_tile_changed)
+	EventBus.terrain_modified.connect(_on_terrain_modified)
 	for sig in [EventBus.plant_planted, EventBus.plant_removed, EventBus.plant_stage_changed]:
 		sig.connect(_on_plants_dirty)
 	EventBus.day_passed.connect(_on_plants_dirty)
@@ -92,8 +95,20 @@ func _setup_grain() -> void:
 	grain_sprite.scale = Vector2.ONE * GRAIN_SCALE
 	grain_sprite.region_enabled = true
 
+## Terracing changed a tile's height: repaint just that neighbourhood of the
+## baked terrain image rather than re-baking the whole map.
+func _on_terrain_modified(idx: int) -> void:
+	if _terrain_image == null or _terrain_tex == null:
+		return
+	var c: Vector2i = WorldMap.coords_of(idx)
+	TerrainBaker.repaint_tiles(_terrain_image, WorldMap.width, WorldMap.height, c.x, c.y)
+	_terrain_tex.update(_terrain_image)
+	structures_layer.queue_redraw()
+
 func _on_world_generated() -> void:
-	terrain_sprite.texture = ImageTexture.create_from_image(TerrainBaker.bake(WorldMap.width, WorldMap.height))
+	_terrain_image = TerrainBaker.bake(WorldMap.width, WorldMap.height)
+	_terrain_tex = ImageTexture.create_from_image(_terrain_image)
+	terrain_sprite.texture = _terrain_tex
 	# Region larger than the texture + repeat enabled == tiled fill.
 	grain_sprite.region_rect = Rect2(0, 0,
 		float(WorldMap.width) * T / GRAIN_SCALE,

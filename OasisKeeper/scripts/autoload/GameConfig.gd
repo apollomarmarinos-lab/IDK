@@ -43,6 +43,19 @@ const VALLEY_BASIN_DEPTH: float = 2.5 ## cross-valley basin so water gathers mid
 const VALLEY_LONG_SLOPE: float = 7.0 ## total elevation drop from north end to south outlet
 const ROCK_SLOPE_THRESHOLD: float = 0.62 ## mountain-mask value above which terrain is bare rock
 
+# ---------------------------------------------------------------------------
+# Height levels and terraforming
+# ---------------------------------------------------------------------------
+## World units per discrete height level. Generation produces a continuous
+## heightfield -- that is what makes the landforms read -- but the player
+## works in whole levels, which is what makes terracing and canal grades
+## something you can reason about instead of guess at.
+const HEIGHT_STEP: float = 0.5
+## How far a tile may be raised or dug relative to its natural height.
+const TERRAFORM_MAX_RAISE: int = 8
+const TERRAFORM_MAX_DIG: int = 8
+const TERRAFORM_TICKS: int = 4 ## labour per level moved
+
 const WADI_DEPTH: float = 1.8 ## depth of the trunk channel at the oasis
 const WADI_WIDTH: float = 2.6 ## half-width of the trunk channel at the oasis
 ## Silt apron either side of a wadi. Applied around every node of the
@@ -110,10 +123,16 @@ const TUNNEL_DATUM_ELEVATION: float = VALLEY_BASE_ELEVATION + 1.5
 const RESERVOIR_CAPACITY: float = 260.0
 const CISTERN_CAPACITY: float = 340.0
 const WELL_RECHARGE_RATE: float = 0.5 ## from rare valley groundwater pockets
-## Flow rate for water moving between connected canal tiles per tick.
-## Based on realistic flow in a ~2m wide channel with gentle slope: ~0.5-1 m/s
-## At 0.25s tick interval: ~0.125-0.25m per tick, scaled to tile units
-const FLOW_RATE: float = 2.5 ## water units moved per tick between connected tiles
+## Maximum water volume a single tile may push out per tick, shared across
+## all of its downhill neighbours in proportion to head difference. Well
+## above what the equalise cap usually allows, so in practice head
+## difference sets the rate and this only bounds the extreme case.
+const FLOW_RATE: float = 10.0
+## A transfer is additionally capped at half the head difference. Without
+## this a tile can overshoot level with its neighbour and the pair ping-pongs
+## water back and forth forever; half the difference is the most that can
+## move before the two surfaces meet.
+const FLOW_EQUALISE_CAP: float = 0.5
 const MIN_FLOW_EPSILON: float = 0.005
 ## Fraction of a canal tile's water pulled into one adjacent dry soil tile
 ## per tick. Kept low deliberately: at high values the first few metres of

@@ -91,12 +91,56 @@ down to your fields. A tunnel tile sitting on an aquifer body draws from it
 automatically.
 
 **Water flows tile to tile, downhill.** Every water structure has a floor
-below the terrain and holds a depth of water on top of it. Each tick, every
-connected pair of neighbours moves a fraction of their hydraulic head
-difference (floor + water depth) from the higher to the lower. So water runs
-along a channel, pools where the ground flattens, and will not climb a rise.
-The valley slopes gently from north to south, giving the whole map a
-consistent downhill direction to work with.
+below the terrain and holds a depth of water on top of it; its hydraulic
+head is floor + depth. Each tick a tile finds every connected neighbour
+whose water *surface* sits lower than its own and pushes out at most
+`FLOW_RATE`, split between them in proportion to how much lower each one is.
+A channel that forks therefore feeds both forks, weighted by pressure,
+rather than the whole flow picking one downstream tile.
+
+Two details in that loop matter more than they look:
+
+- A transfer is capped at half the head difference. Water raises the
+  receiving surface as it lowers the donating one, so moving more than half
+  the difference overshoots level and the pair ping-pongs water back and
+  forth forever.
+- Tiles that are dry and have no source **go to sleep** and stop being
+  simulated; a neighbour pushing water into one wakes it again. Sources
+  (mountain tunnels on an aquifer, wells over groundwater) never sleep, and
+  whether a structure *has* a source is decided once when it is built rather
+  than re-checked every tick. On a large network most tiles are idle at any
+  moment, and this is what keeps that affordable.
+
+Water runs along a channel, pools where the ground flattens, and will not
+climb a rise. The valley slopes gently from north to south, giving the whole
+map a consistent downhill direction to work with.
+
+## Height levels and terraforming
+
+Every tile has a **height level** — the continuous heightfield from
+generation, quantised into `HEIGHT_STEP` units. The inspector shows it, and
+it is the unit terracing works in.
+
+The **Terraform** tools raise or dig a tile one level at a time, and they
+are restricted to the valley floor: mountain rock and the scree apron of the
+foothills both refuse, because being able to flatten the ranges would
+dissolve the constraint the entire water problem is built around. A tile can
+be moved up to 8 levels either way from its natural height, and terracing is
+queued as labour like any other job rather than snapping the instant you
+click.
+
+Terraforming is stored as a separate signed offset per tile, not baked into
+the elevation. That keeps the geological heightfield intact — generation,
+hillshading and the wadi network all still see the land they produced — and
+makes the player's edits inspectable and bounded. Everything that cares
+about height reads `WorldMap.terrain_height()`, so canal floors, flow and
+hillshading all pick the change up automatically, and only the edited
+neighbourhood of the terrain image is repainted.
+
+The practical use is grade. Dig a line of tiles descending away from your
+source and an open canal laid along it will actually carry water instead of
+pooling where the ground flattens; raise a tile to dam a hollow or to force
+a channel to run somewhere else.
 
 **Trenches follow the ground; buried conduits are cut to a gradient.** This
 distinction is load-bearing. An open canal is a trench: its floor follows

@@ -100,6 +100,22 @@ func place(idx: int, requested: int) -> bool:
 	EventBus.emit_signal("tile_changed", idx)
 	return true
 
+## Terraforming is queued like any other job so it takes visible labour
+## rather than snapping the ground the instant you click.
+func queue_terraform(idx: int, delta_levels: int) -> bool:
+	if _pending.has(idx):
+		return false
+	if not WorldMap.can_terraform(idx, delta_levels):
+		return false
+	_pending[idx] = {
+		"structure": -1,
+		"terraform": delta_levels,
+		"ticks_left": GameConfig.TERRAFORM_TICKS,
+		"ticks_total": GameConfig.TERRAFORM_TICKS,
+	}
+	EventBus.emit_signal("tile_changed", idx)
+	return true
+
 func cancel(idx: int) -> bool:
 	if not _pending.has(idx):
 		return false
@@ -147,6 +163,9 @@ func simulate_tick() -> void:
 		var entry: Dictionary = _pending[idx]
 		var structure: int = entry["structure"]
 		_pending.erase(idx)
+		if entry.has("terraform"):
+			WorldMap.apply_terraform(idx, int(entry["terraform"]))
+			continue
 		WorldMap.structure_type[idx] = structure
 		if structure == WorldMap.Structure.GATE:
 			WorldMap.gate_open[idx] = 1

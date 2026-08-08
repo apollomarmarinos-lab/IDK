@@ -24,6 +24,13 @@ var rare_groundwater: PackedFloat32Array = PackedFloat32Array()
 ## player will most likely want to settle.
 var oases: PackedInt32Array = PackedInt32Array()
 
+## Player terraforming, in whole height levels relative to the natural
+## ground. Kept separate from `elevation` so the geological heightfield
+## stays intact -- generation, hillshading and the wadi network all still
+## see the land they produced, and terracing is a clean signed offset on
+## top that can be inspected, limited and undone.
+var terraform_offset: PackedInt32Array = PackedInt32Array()
+
 # Aquifer bodies inside the rock. aquifer_id indexes into the per-body arrays.
 var aquifer_id: PackedInt32Array = PackedInt32Array()
 var aquifer_volume: PackedFloat32Array = PackedFloat32Array()
@@ -77,6 +84,9 @@ func generate(rng_seed: int = -1) -> void:
 
 	air_moisture = _new_float_layer(size)
 	air_moisture.fill(0.06) # ambient desert humidity baseline
+
+	terraform_offset = PackedInt32Array()
+	terraform_offset.resize(size)
 
 	structure_type = PackedByteArray()
 	structure_type.resize(size)
@@ -177,6 +187,62 @@ func water_capacity(idx: int) -> float:
 		_:
 			return GameConfig.CANAL_CAPACITY
 
+## Ground height of a tile including any terracing the player has done.
+## Everything that cares about height -- water, canal floors, the inspector
+## -- goes through this rather than reading `elevation` directly.
+func terrain_height(idx: int) -> float:
+	return elevation[idx] + float(terraform_offset[idx]) * GameConfig.HEIGHT_STEP
+
+## The same height expressed in whole levels, which is the unit the player
+## builds and terraces in.
+func height_level(idx: int) -> int:
+	return int(round(terrain_height(idx) / GameConfig.HEIGHT_STEP))
+
+## Terraforming is a valley-floor activity. Bare rock and the scree apron of
+## the foothills are explicitly excluded: shifting those would let the player
+## flatten the ranges themselves, which are meant to be the fixed constraint
+## the whole water problem is built around.
+func can_terraform(idx: int, delta_levels: int) -> bool:
+	if idx < 0 or idx >= width * height:
+		return false
+	var t: int = terrain_type[idx]
+	if t == Terrain.ROCK or t == Terrain.SCREE:
+		return false
+	if structure_type[idx] != Structure.NONE:
+		return false
+	if PlantSystem.plants.has(idx):
+		return false
+	var next_offset: int = terraform_offset[idx] + delta_levels
+	return next_offset <= GameConfig.TERRAFORM_MAX_RAISE and next_offset >= -GameConfig.TERRAFORM_MAX_DIG
+
+## Why a terraform was refused, for the build panel.
+func terraform_hint(idx: int, delta_levels: int) -> String:
+	if idx < 0:
+		return ""
+	var t: int = terrain_type[idx]
+	if t == Terrain.ROCK:
+		return "Cannot terraform mountain rock"
+	if t == Terrain.SCREE:
+		return "Cannot terraform the foothills"
+	if structure_type[idx] != Structure.NONE:
+		return "Clear the structure first"
+	if PlantSystem.plants.has(idx):
+		return "Remove the plant first"
+	var next_offset: int = terraform_offset[idx] + delta_levels
+	if next_offset > GameConfig.TERRAFORM_MAX_RAISE:
+		return "Already raised as far as it will go"
+	if next_offset < -GameConfig.TERRAFORM_MAX_DIG:
+		return "Already dug as deep as it will go"
+	return ""
+
+func apply_terraform(idx: int, delta_levels: int) -> bool:
+	if not can_terraform(idx, delta_levels):
+		return false
+	terraform_offset[idx] += delta_levels
+	EventBus.emit_signal("terrain_modified", idx)
+	EventBus.emit_signal("tile_changed", idx)
+	return true
+
 ## Elevation of the channel floor. Dug structures sit below grade, which is
 ## what makes water run downhill along a canal instead of pooling in place.
 ##
@@ -194,9 +260,10 @@ func water_capacity(idx: int) -> float:
 ## cheaper tool.
 func floor_elevation(idx: int) -> float:
 	var s: int = structure_type[idx]
+	var ground: float = terrain_height(idx)
 	if s == Structure.NONE:
-		return elevation[idx]
-	var dug: float = elevation[idx] - GameConfig.CANAL_FLOOR_DEPTH
+		return ground
+	var dug: float = ground - GameConfig.CANAL_FLOOR_DEPTH
 	if s == Structure.CANAL_MOUNTAIN or s == Structure.CANAL_COVERED:
 		return minf(dug, GameConfig.TUNNEL_DATUM_ELEVATION)
 	return dug

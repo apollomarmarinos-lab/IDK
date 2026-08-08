@@ -34,16 +34,15 @@ func _frame_subject() -> void:
 	if zi >= 0 and zi + 1 < args.size():
 		var z: float = float(args[zi + 1])
 		cam.zoom = Vector2(z, z)
+	if args.has("--screenshot-oasis") and not WorldMap.oases.is_empty():
+		var oc: Vector2i = WorldMap.coords_of(WorldMap.oases[0])
+		cam.position = Vector2(float(oc.x), float(oc.y) + 14.0) * float(GameConfig.TILE_PIXEL_SIZE)
+		return
 	for i in range(WorldMap.width * WorldMap.height):
 		if WorldMap.is_canal(i) and WorldMap.water[i] > 0.5:
 			var c: Vector2i = WorldMap.coords_of(i)
 			cam.position = Vector2(float(c.x) + 6.0, float(c.y) + 2.0) * float(GameConfig.TILE_PIXEL_SIZE)
 			return
-	# No canal to look at: either frame an oasis sink, or the whole map.
-	if args.has("--screenshot-oasis") and not WorldMap.oases.is_empty():
-		var o: Vector2i = WorldMap.coords_of(WorldMap.oases[0])
-		cam.position = Vector2(float(o.x), float(o.y)) * float(GameConfig.TILE_PIXEL_SIZE)
-		return
 	cam.position = Vector2(float(WorldMap.width), float(WorldMap.height)) * 0.5 * float(GameConfig.TILE_PIXEL_SIZE)
 
 ## Forces the clock to a given hour and freezes it. Done SETTLE_FRAMES

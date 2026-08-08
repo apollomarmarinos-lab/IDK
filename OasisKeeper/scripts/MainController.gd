@@ -96,6 +96,10 @@ func _apply_tool_at_mouse() -> void:
 			BuildSystem.place(idx, WorldMap.Structure.WELL)
 		&"shade_structure":
 			BuildSystem.place(idx, WorldMap.Structure.SHADE_STRUCTURE)
+		&"raise_ground":
+			BuildSystem.queue_terraform(idx, 1)
+		&"lower_ground":
+			BuildSystem.queue_terraform(idx, -1)
 
 func _on_tool_selected(tool_name: StringName) -> void:
 	current_tool = tool_name
