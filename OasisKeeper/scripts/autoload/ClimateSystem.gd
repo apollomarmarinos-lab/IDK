@@ -19,7 +19,15 @@ var _air_moisture_next: PackedFloat32Array = PackedFloat32Array()
 var _neighbor_buf: PackedInt32Array = PackedInt32Array([0, 0, 0, 0])
 
 var _temperature_tick_counter: int = 0
-const TEMPERATURE_UPDATE_EVERY_N_TICKS: int = 2
+var _moisture_tick_counter: int = 0
+## Tiles carrying a shade structure. Maintained incrementally instead of
+## rescanning the whole map every tick just to find a handful of them.
+var _shade_structures: Dictionary = {}
+## Temperature and humidity are whole-map passes over every tile, and both
+## change slowly compared to the tick rate, so they run on a stride rather
+## than every tick. On a large map these two loops dominate the frame cost.
+const TEMPERATURE_UPDATE_EVERY_N_TICKS: int = 4
+const MOISTURE_UPDATE_EVERY_N_TICKS: int = 3
 
 func _ready() -> void:
 	_wind_noise_a.seed = randi()
@@ -27,9 +35,19 @@ func _ready() -> void:
 	_wind_noise_b.seed = randi()
 	_wind_noise_b.frequency = 1.0
 	EventBus.world_generated.connect(_on_world_generated)
+	EventBus.building_completed.connect(_on_building_completed)
+	EventBus.building_removed.connect(_on_building_removed)
 
 func _on_world_generated() -> void:
 	_air_moisture_next = WorldMap.air_moisture.duplicate()
+	_shade_structures.clear()
+
+func _on_building_completed(idx: int, _id: StringName) -> void:
+	if WorldMap.structure_type[idx] == WorldMap.Structure.SHADE_STRUCTURE:
+		_shade_structures[idx] = true
+
+func _on_building_removed(idx: int) -> void:
+	_shade_structures.erase(idx)
 
 func simulate_tick() -> void:
 	if WorldMap.width == 0:
@@ -42,7 +60,10 @@ func simulate_tick() -> void:
 	_update_shade()
 	_evaporate_surface()
 	_evaporate_soil()
-	_diffuse_air_moisture()
+	_moisture_tick_counter += 1
+	if _moisture_tick_counter >= MOISTURE_UPDATE_EVERY_N_TICKS:
+		_moisture_tick_counter = 0
+		_diffuse_air_moisture()
 
 func _update_wind() -> void:
 	_wind_time += GameConfig.SIM_TICK_INTERVAL * 0.05
@@ -78,11 +99,8 @@ func _update_shade() -> void:
 		if canopy <= 0.0:
 			continue
 		_splat_shade(idx, plant.data.shade_radius, plant.data.shade_strength * canopy)
-	var w: int = WorldMap.width
-	var h: int = WorldMap.height
-	for i in range(w * h):
-		if WorldMap.structure_type[i] == WorldMap.Structure.SHADE_STRUCTURE:
-			_splat_shade(i, GameConfig.SHADE_STRUCTURE_RADIUS, GameConfig.SHADE_STRUCTURE_STRENGTH)
+	for idx in _shade_structures.keys():
+		_splat_shade(idx, GameConfig.SHADE_STRUCTURE_RADIUS, GameConfig.SHADE_STRUCTURE_STRENGTH)
 
 func _splat_shade(center_idx: int, radius: float, strength: float) -> void:
 	if radius <= 0.0 or strength <= 0.0:

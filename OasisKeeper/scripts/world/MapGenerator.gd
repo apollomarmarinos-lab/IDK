@@ -106,7 +106,7 @@ static func generate(width: int, height: int, rng_seed: int) -> Dictionary:
 			var peak_mod_right: float = 1.0 + (peak_right - 0.5) * 0.8 * fall_right
 			var mountain_h: float = mask * ridge * GameConfig.MOUNTAIN_HEIGHT_SCALE
 			mountain_h *= maxf(peak_mod_left, peak_mod_right)
-                        if fall_left > 0.01:
+			if fall_left > 0.01:
 				var exp_fall_left: float = pow(fall_left, slope_exp_left)
 				mountain_h = maxf(mountain_h, exp_fall_left * ridge * GameConfig.MOUNTAIN_HEIGHT_SCALE * 0.7)
 			if fall_right > 0.01:
@@ -154,13 +154,33 @@ static func generate(width: int, height: int, rng_seed: int) -> Dictionary:
 			var m11: float = low_mountain_mask[idx11]
 			var m_interp: float = lerp(lerp(m00, m10, fx), lerp(m01, m11, fx), fy)
 			
-			# Add fine detail at full resolution
-			var fine_detail: float = detail_noise.get_noise_2d(float(x), float(y)) * 0.3
+			# Add fine detail at full resolution. Kept small on purpose: the
+			# whole valley only drops VALLEY_LONG_SLOPE (~7) end to end, so
+			# large per-tile noise here swamps the regional gradient and the
+			# drainage tracer can no longer find its way downhill.
+			var fine_detail: float = detail_noise.get_noise_2d(float(x), float(y)) * 0.12
 			elevation[idx] = h_interp + fine_detail
 			mountain_mask[idx] = m_interp
 
+	# The range centrelines were computed in low-resolution space: indexed by
+	# low_y and measured in low_x units. Every later pass works at full
+	# resolution, so they must be resampled first -- indexing a
+	# low_height-long array with a full-height y both reads out of bounds and
+	# places the wadis at half their true x.
+	var full_left_centers := PackedFloat32Array()
+	var full_right_centers := PackedFloat32Array()
+	full_left_centers.resize(height)
+	full_right_centers.resize(height)
+	for y in range(height):
+		var ly: float = float(y) / float(scale_factor)
+		var y0: int = clampi(int(floorf(ly)), 0, low_height - 1)
+		var y1: int = mini(y0 + 1, low_height - 1)
+		var fy: float = ly - float(y0)
+		full_left_centers[y] = lerpf(left_centers[y0], left_centers[y1], fy) * scale_factor
+		full_right_centers[y] = lerpf(right_centers[y0], right_centers[y1], fy) * scale_factor
+
 	# --- Pass 3: wadi network ---------------------------------------------
-	_carve_wadis(width, height, rng, elevation, mountain_mask, wadi_strength, left_centers, right_centers)
+	_carve_wadis(width, height, rng, elevation, mountain_mask, wadi_strength, full_left_centers, full_right_centers)
 
 	# --- Pass 4 & 5: dunes, then terrain classification -------------------
 	for y in range(height):
@@ -200,17 +220,40 @@ static func generate(width: int, height: int, rng_seed: int) -> Dictionary:
 	var aquifer_result: Dictionary = _generate_aquifers(width, height, rng, terrain_type, elevation)
 
 	# Rare groundwater pockets on the valley floor (wells, not aquifers).
+	#
+	# The cutoff is a PERCENTILE of the actual field, not a fixed threshold.
+	# A fixed one (v > 0.85) depends on how often the noise happens to reach
+	# its extremes, which varies with frequency, octaves and map size -- at
+	# one point it produced literally zero pockets map-wide, silently making
+	# the Well tool impossible to use. Taking the top slice guarantees a
+	# sensible number of sites on any map.
 	var gw_noise := _make_noise(rng_seed + 707, FastNoiseLite.TYPE_PERLIN, 0.035, 3)
 	var rare_groundwater := PackedFloat32Array()
 	rare_groundwater.resize(size)
+
+	var gw_values := PackedFloat32Array()
+	var gw_indices := PackedInt32Array()
 	for idx in range(size):
 		if terrain_type[idx] == TERRAIN_ROCK or terrain_type[idx] == TERRAIN_SCREE:
 			continue
 		var v: float = (gw_noise.get_noise_2d(float(idx % width), float(idx / width)) + 1.0) * 0.5
 		# Shallow groundwater tracks the wadis -- that is where it really sits.
 		v += wadi_strength[idx] * 0.15
-		if v > 0.85:
-			rare_groundwater[idx] = clampf((v - 0.85) / 0.15, 0.0, 1.0)
+		gw_values.append(v)
+		gw_indices.append(idx)
+
+	if not gw_values.is_empty():
+		# Aim for roughly one pocket tile per 900 tiles of map, clamped so
+		# small maps still get a handful and large ones do not drown in them.
+		var target: int = clampi(int(float(size) / 900.0), 20, 400)
+		target = mini(target, gw_values.size())
+		var sorted_values: PackedFloat32Array = gw_values.duplicate()
+		sorted_values.sort()
+		var cutoff: float = sorted_values[sorted_values.size() - target]
+		var span: float = maxf(0.001, sorted_values[sorted_values.size() - 1] - cutoff)
+		for i in range(gw_values.size()):
+			if gw_values[i] >= cutoff:
+				rare_groundwater[gw_indices[i]] = clampf((gw_values[i] - cutoff) / span, 0.15, 1.0)
 
 	return {
 		"terrain_type": terrain_type,
@@ -236,96 +279,127 @@ static func _make_noise(s: int, type: int, freq: float, octaves: int) -> FastNoi
 ## valley, then carves each into the heightmap. Because the paths follow the
 ## terrain they were generated from, the resulting network branches and
 ## meanders the way real drainage does.
+## Carves the drainage network.
+##
+## Built as a trunk channel plus tributaries rather than by tracing steepest
+## descent from each source. Pure descent tracing was tried and does not
+## survive this terrain: the valley floor only falls VALLEY_LONG_SLOPE over
+## the whole map, so once a channel leaves the foothills the regional
+## gradient per tile is smaller than the surface roughness, and the walk
+## stalls in the first shallow pit it meets. The result was stub channels a
+## few tiles long and a valley with almost no alluvium.
+##
+## A trunk-and-tributary network is also simply what an arid valley looks
+## like: one main wash down the axis, with side channels coming off the
+## ranges to join it, building alluvial fans where they meet the floor.
 static func _carve_wadis(width: int, height: int, rng: RandomNumberGenerator,
 		elevation: PackedFloat32Array, mountain_mask: PackedFloat32Array,
 		wadi_strength: PackedFloat32Array, left_centers: PackedFloat32Array,
 		right_centers: PackedFloat32Array) -> void:
-	var paths: Array[PackedInt32Array] = []
-	for i in range(GameConfig.WADI_COUNT):
-		var y: int = rng.randi_range(int(height * 0.05), int(height * 0.95))
+	# --- trunk wash down the valley axis ----------------------------------
+	var trunk_meander := _make_noise(rng.randi(), FastNoiseLite.TYPE_PERLIN, 0.012, 3)
+	var trunk_x := PackedInt32Array()
+	trunk_x.resize(height)
+	for y in range(height):
+		var centre: float = (left_centers[y] + right_centers[y]) * 0.5
+		var valley_half: float = maxf(4.0, (right_centers[y] - left_centers[y]) * 0.5)
+		# Wander across the floor, but never far enough to climb the ranges.
+		var wander: float = trunk_meander.get_noise_1d(float(y)) * valley_half * 0.45
+		trunk_x[y] = clampi(int(centre + wander), 1, width - 2)
+
+	for y in range(height):
+		# The wash gathers flow as it runs south, so it widens and deepens.
+		var maturity: float = float(y) / float(maxi(1, height - 1))
+		var w: float = GameConfig.WADI_WIDTH * (0.9 + maturity * 1.4)
+		var d: float = GameConfig.WADI_DEPTH * (0.7 + maturity * 1.1)
+		_carve_at(width, height, trunk_x[y], y, w, d, elevation, wadi_strength)
+
+	# --- tributaries off both ranges --------------------------------------
+	var reference_area: float = 180.0 * 120.0
+	var area_scale: float = sqrt(float(width * height) / reference_area)
+	var tributary_count: int = maxi(GameConfig.WADI_COUNT, int(round(float(GameConfig.WADI_COUNT) * area_scale)))
+
+	for i in range(tributary_count):
+		var y: int = rng.randi_range(int(height * 0.04), int(height * 0.96))
 		var from_left: bool = (i % 2) == 0
-		# Start at the foot of the range and run out into the open valley.
 		var x: int
 		if from_left:
-			x = int(left_centers[y] + GameConfig.FOOTHILL_WIDTH * 0.6)
+			x = int(left_centers[y] + GameConfig.FOOTHILL_WIDTH * 0.5)
 		else:
-			x = int(right_centers[y] - GameConfig.FOOTHILL_WIDTH * 0.6)
+			x = int(right_centers[y] - GameConfig.FOOTHILL_WIDTH * 0.5)
 		x = clampi(x, 1, width - 2)
-		var path := _trace_descent(width, height, x, y, elevation, mountain_mask, rng)
-		if path.size() > 6:
-			paths.append(path)
+		_carve_tributary(width, height, x, y, trunk_x, rng, elevation, wadi_strength)
 
-	for path in paths:
-		for i in range(path.size()):
-			var idx: int = path[i]
-			var px: int = idx % width
-			var py: int = idx / width
-			# Channels widen and deepen as they gather flow downstream.
-			var maturity: float = float(i) / float(max(1, path.size() - 1))
-			var w: float = GameConfig.WADI_WIDTH * (0.5 + maturity * 0.9)
-			var d: float = GameConfig.WADI_DEPTH * (0.4 + maturity * 0.9)
-			var r: int = int(ceil(w + GameConfig.ALLUVIUM_WIDTH))
-			for dy in range(-r, r + 1):
-				var ny: int = py + dy
-				if ny < 0 or ny >= height:
-					continue
-				for dx in range(-r, r + 1):
-					var nx: int = px + dx
-					if nx < 0 or nx >= width:
-						continue
-					var dist: float = sqrt(float(dx * dx + dy * dy))
-					var nidx: int = ny * width + nx
-					if dist <= w:
-						var cut: float = d * (1.0 - dist / w)
-						elevation[nidx] -= cut
-						wadi_strength[nidx] = maxf(wadi_strength[nidx], 1.0 - dist / w)
-					elif dist <= w + GameConfig.ALLUVIUM_WIDTH:
-						var t: float = 1.0 - (dist - w) / GameConfig.ALLUVIUM_WIDTH
-						wadi_strength[nidx] = maxf(wadi_strength[nidx], t * 0.55)
-
-static func _trace_descent(width: int, height: int, start_x: int, start_y: int,
-		elevation: PackedFloat32Array, mountain_mask: PackedFloat32Array,
-		rng: RandomNumberGenerator) -> PackedInt32Array:
-	var path := PackedInt32Array()
+## Walks a side channel from the foothills to the trunk. Horizontal progress
+## is forced one tile at a time so the channel always arrives, while the
+## vertical position is driven by a per-channel meander noise blended with a
+## downhill bias. Without the meander term the drift is decided purely by
+## local height, and on the near-flat valley floor that evaluates to zero
+## every step, producing perfectly straight east-west lines.
+static func _carve_tributary(width: int, height: int, start_x: int, start_y: int,
+		trunk_x: PackedInt32Array, rng: RandomNumberGenerator,
+		elevation: PackedFloat32Array, wadi_strength: PackedFloat32Array) -> void:
+	var wander := _make_noise(rng.randi(), FastNoiseLite.TYPE_PERLIN, 0.055, 2)
 	var x: int = start_x
+	var fy: float = float(start_y)
 	var y: int = start_y
-	var visited := {}
-	for _step in range(width + height):
-		var idx: int = y * width + x
-		if visited.has(idx):
-			break
-		visited[idx] = true
-		path.append(idx)
-		var best_x: int = x
-		var best_y: int = y
-		var best_h: float = elevation[idx]
-		for dy in range(-1, 2):
-			for dx in range(-1, 2):
-				if dx == 0 and dy == 0:
-					continue
-				var nx: int = x + dx
-				var ny: int = y + dy
-				if nx < 1 or nx >= width - 1 or ny < 1 or ny >= height - 1:
-					continue
-				# A little jitter keeps channels from running dead straight
-				# down the gradient.
-				var h: float = elevation[ny * width + nx] + rng.randf_range(-0.12, 0.12)
-				if h < best_h:
-					best_h = h
-					best_x = nx
-					best_y = ny
-		if best_x == x and best_y == y:
-			break # reached a local sink; the channel ends here
-		x = best_x
-		y = best_y
-		if mountain_mask[y * width + x] < 0.02 and path.size() > int(width * 0.25):
-			break # far enough out into the open valley
-	return path
+	var target: int = trunk_x[clampi(y, 0, height - 1)]
+	var step: int = 1 if target > x else -1
+	var total: int = maxi(1, absi(target - x))
+	var travelled: int = 0
 
-## Grows organic aquifer bodies inside the rock with a randomized flood fill.
-## Each body is a connected blob with its own finite volume and recharge, so
-## players must find them (geology overlay), reach them with a tunnel, and
-## then manage them -- a small aquifer can genuinely be pumped dry.
+	while x != target and travelled < total:
+		# Downhill preference, sampled one column ahead.
+		var down: float = 0.0
+		var ahead: int = clampi(x + step, 1, width - 2)
+		var best: float = INF
+		for dy in [-1, 0, 1]:
+			var ny: int = clampi(y + dy, 1, height - 2)
+			var h: float = elevation[ny * width + ahead]
+			if h < best:
+				best = h
+				down = float(dy)
+
+		# fy is kept as a float and NOT snapped back to y each step: rounding
+		# it into the integer grid every iteration would discard the
+		# fractional drift, the per-step movement would cap at +/-1, and the
+		# meander would average out into a straight line.
+		var meander: float = wander.get_noise_1d(float(travelled))
+		fy += clampf(meander * 1.6 + down * 0.5, -1.6, 1.6)
+		fy = clampf(fy, 1.0, float(height - 2))
+		y = clampi(int(round(fy)), 1, height - 2)
+		x += step
+		travelled += 1
+		target = trunk_x[clampi(y, 0, height - 1)]
+
+		var maturity: float = float(travelled) / float(total)
+		var w: float = GameConfig.WADI_WIDTH * (0.35 + maturity * 0.65)
+		var d: float = GameConfig.WADI_DEPTH * (0.3 + maturity * 0.7)
+		_carve_at(width, height, x, y, w, d, elevation, wadi_strength)
+
+## Cuts a single channel cross-section, with a silt apron either side.
+static func _carve_at(width: int, height: int, px: int, py: int, w: float, d: float,
+		elevation: PackedFloat32Array, wadi_strength: PackedFloat32Array) -> void:
+	var r: int = int(ceil(w + GameConfig.ALLUVIUM_WIDTH))
+	for dy in range(-r, r + 1):
+		var ny: int = py + dy
+		if ny < 0 or ny >= height:
+			continue
+		var row: int = ny * width
+		for dx in range(-r, r + 1):
+			var nx: int = px + dx
+			if nx < 0 or nx >= width:
+				continue
+			var dist: float = sqrt(float(dx * dx + dy * dy))
+			var nidx: int = row + nx
+			if dist <= w:
+				elevation[nidx] -= d * (1.0 - dist / w)
+				wadi_strength[nidx] = maxf(wadi_strength[nidx], 1.0 - dist / w)
+			elif dist <= w + GameConfig.ALLUVIUM_WIDTH:
+				var t: float = 1.0 - (dist - w) / GameConfig.ALLUVIUM_WIDTH
+				wadi_strength[nidx] = maxf(wadi_strength[nidx], t * 0.6)
+
+
 static func _generate_aquifers(width: int, height: int, rng: RandomNumberGenerator,
 		terrain_type: PackedByteArray, elevation: PackedFloat32Array) -> Dictionary:
 	var size: int = width * height

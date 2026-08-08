@@ -147,6 +147,10 @@ func _refresh() -> void:
 		flow_layer.queue_redraw()
 
 func _rebuild_data_images() -> void:
+	# Only pay for the overlay pass when an overlay is actually showing; on a
+	# large map this is a whole extra sweep over every tile, five times a
+	# second, for pixels nobody sees.
+	var overlay_on: bool = overlay_mode != Overlay.NONE
 	var size: int = WorldMap.width * WorldMap.height
 	for i in range(size):
 		var o: int = i * 4
@@ -165,14 +169,16 @@ func _rebuild_data_images() -> void:
 		_shade_data[o + 2] = 34
 		_shade_data[o + 3] = int(clampf(sh, 0.0, 1.0) * 120.0)
 
-		_write_overlay_pixel(i, o)
+		if overlay_on:
+			_write_overlay_pixel(i, o)
 
 	var w: int = WorldMap.width
 	var h: int = WorldMap.height
 	_moisture_tex = _update_texture(_moisture_tex, moisture_sprite, w, h, _moisture_data)
 	_shade_tex = _update_texture(_shade_tex, shade_sprite, w, h, _shade_data)
-	_overlay_tex = _update_texture(_overlay_tex, overlay_sprite, w, h, _overlay_data)
-	overlay_sprite.visible = overlay_mode != Overlay.NONE
+	if overlay_on:
+		_overlay_tex = _update_texture(_overlay_tex, overlay_sprite, w, h, _overlay_data)
+	overlay_sprite.visible = overlay_on
 
 func _write_overlay_pixel(i: int, o: int) -> void:
 	var r: int = 0

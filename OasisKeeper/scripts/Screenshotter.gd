@@ -39,6 +39,9 @@ func _frame_subject() -> void:
 			var c: Vector2i = WorldMap.coords_of(i)
 			cam.position = Vector2(float(c.x) + 6.0, float(c.y) + 2.0) * float(GameConfig.TILE_PIXEL_SIZE)
 			return
+	# No canal to look at: frame the whole map, which is what an overview
+	# shot of the terrain wants.
+	cam.position = Vector2(float(WorldMap.width), float(WorldMap.height)) * 0.5 * float(GameConfig.TILE_PIXEL_SIZE)
 
 ## Forces the clock to a given hour and freezes it. Done SETTLE_FRAMES
 ## before the capture because the day/night tint eases toward its target
