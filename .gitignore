@@ -3,33 +3,39 @@
 *.import
 *.remap
 export_presets.cfg
-.unimported_scenes
-.editor
+.mobile_importer/
+.editor/
+.vs/
+.vscode/
 
 # Build artifacts
 *.exe
 *.dll
 *.so
 *.dylib
+*.pdb
+*.ilk
+
+# Dependencies
+*.gdns
+*.gdnlib
+*.tres
+*.res
+
+# Logs
+*.log
 
 # Temporary files
 *.tmp
 *.temp
-*.log
+*.backup
 
 # Environment
 .env
 .env.local
-.env.*
+*.env.*
 
-# Dependencies
-node_modules/
-venv/
-.venv/
-__pycache__/
-*.egg-info/
-
-# OS generated files
+# OS specific
 .DS_Store
 Thumbs.db
 ```
