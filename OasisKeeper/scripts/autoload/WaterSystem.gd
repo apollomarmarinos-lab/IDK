@@ -190,15 +190,28 @@ func _flow_pass() -> void:
 				continue
 			if not WorldMap.water_may_pass(idx_i, nidx):
 				continue # basin rim: only inlets exchange with the outside
-			# Water never climbs. Head alone does not guarantee this: a brim
-			# full channel's surface can stand above the floor of a channel a
-			# level higher up, and without this check it would push water up
-			# the step. Same level is fine -- that is what makes a run flow --
-			# strictly higher is refused outright, and the player grades the
-			# route with the terraform tools instead.
-			if WorldMap.height_differential(idx_i, nidx) < 0:
-				continue
-			if WorldMap.water[nidx] >= WorldMap.water_capacity(nidx):
+			# Reservoirs and cisterns are ALWAYS open to connected canals at any level.
+			# This allows them to fill from source canals regardless of height difference.
+			# Water flows into reservoirs until reaching the target level or source canal level.
+			var is_reservoir_dest: bool = WorldMap.is_reservoir_or_cistern(nidx)
+			var is_canal_source: bool = WorldMap.is_canal(idx_i)
+			# Check if reservoir has reached its target level
+			var reservoir_at_target: bool = false
+			if is_reservoir_dest:
+				var target_level: int = WorldMap.reservoir_target_level[nidx]
+				var current_level: int = WorldMap.height_level(nidx)
+				var water_depth_levels: float = WorldMap.water[nidx] / GameConfig.CANAL_CAPACITY
+				var effective_level: float = float(current_level) + water_depth_levels
+				# Stop filling if we have reached the target level (in height units)
+				if effective_level >= float(target_level):
+					reservoir_at_target = true
+			
+			# Water never climbs EXCEPT when flowing into a reservoir/cistern.
+			# For normal canal-to-canal flow, the no-uphill rule still applies.
+			if not is_reservoir_dest:
+				if WorldMap.height_differential(idx_i, nidx) < 0:
+					continue
+			if WorldMap.water[nidx] >= WorldMap.water_capacity(nidx) or reservoir_at_target:
 				continue
 			var diff: float = self_head - WorldMap.head(nidx)
 			if diff <= GameConfig.MIN_FLOW_EPSILON:

@@ -66,7 +66,10 @@ const SCREE_RELIEF: float = 0.16 ## talus apron above this relief
 ## heightfield -- that is what makes the landforms read -- but the player
 ## works in whole levels, which is what makes terracing and canal grades
 ## something you can reason about instead of guess at.
-const HEIGHT_STEP: float = 0.5
+## Increased from 0.5 to 1.5 to make height levels more distinguishable.
+## This reduces effective levels from ~20 to ~6-7, enough to distinguish
+## mountain peaks, foothills, and valley floor clearly.
+const HEIGHT_STEP: float = 1.5
 ## How far a tile may be raised or dug relative to its natural height.
 const TERRAFORM_MAX_RAISE: int = 8
 const TERRAFORM_MAX_DIG: int = 8

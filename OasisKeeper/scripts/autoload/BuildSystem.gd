@@ -11,6 +11,9 @@ extends Node
 var _pending: Dictionary = {} ## idx(int) -> {"structure": int, "ticks_left": int, "ticks_total": int}
 ## Footprint currently selected for multi-tile basins, cycled with R.
 var basin_size_index: int = 0
+## Target water level offset for reservoirs/cisterns (relative to source canal level).
+## Adjusted with +/- keys or scroll wheel while placing reservoir/cistern.
+var reservoir_level_offset: int = 0
 
 ## Footprint of a structure in tiles. Everything not listed is a single tile.
 func footprint_of(structure: int) -> Vector2i:
@@ -20,6 +23,11 @@ func footprint_of(structure: int) -> Vector2i:
 
 func cycle_basin_size() -> void:
 	basin_size_index = (basin_size_index + 1) % GameConfig.RESERVOIR_SIZES.size()
+
+func adjust_reservoir_level(delta: int) -> void:
+	reservoir_level_offset += delta
+	# Clamp to reasonable bounds (can't go below 0 or absurdly high)
+	reservoir_level_offset = clampi(reservoir_level_offset, 0, 20)
 
 ## Tiles a structure placed at `origin` would occupy, or empty if it does not
 ## fit on the map. The origin is the top-left of the footprint.
@@ -250,6 +258,8 @@ func _complete_basin(origin: int, structure: int, size: Vector2i) -> void:
 			var side_middle: bool = (dx == mid_x and (dy == 0 or dy == size.y - 1)) \
 				or (dy == mid_y and (dx == 0 or dx == size.x - 1))
 			WorldMap.is_inlet[t] = 1 if (on_edge and side_middle) else 0
+			# Set the target water level for this reservoir/cistern tile
+			WorldMap.reservoir_target_level[t] = WorldMap.height_level(origin) + reservoir_level_offset
 			WaterSystem.register_structure(t)
 
 func structure_name(structure: int) -> StringName:
