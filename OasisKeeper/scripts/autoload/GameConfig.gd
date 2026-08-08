@@ -18,7 +18,10 @@ extends Node
 const MAP_WIDTH: int = 180
 const MAP_HEIGHT: int = 120
 const TILE_PIXEL_SIZE: int = 24 ## on-screen pixel size of one simulation tile
-const TERRAIN_DETAIL: int = 4 ## sub-pixels per tile in the baked terrain image
+## Sub-pixels per tile in the baked terrain image. 4 gives enough sub-tile
+## relief and material texture to read as landform; finer detail at high
+## zoom comes from the tiled grain layer in WorldRenderer.
+const TERRAIN_DETAIL: int = 4
 
 # ---------------------------------------------------------------------------
 # Time
@@ -71,6 +74,11 @@ const AQUIFER_PRESSURE_EXPONENT: float = 0.6
 # ---------------------------------------------------------------------------
 const CANAL_CAPACITY: float = 10.0 ## max water depth a canal tile holds
 const CANAL_FLOOR_DEPTH: float = 1.2 ## how far a dug canal floor sits below terrain
+## Mountain tunnels are bored on a descending gradient rather than following
+## the surface, so their floor never sits above this datum. Set just above
+## the valley floor so a tunnel always drains valley-ward. See
+## WorldMap.floor_elevation().
+const TUNNEL_DATUM_ELEVATION: float = VALLEY_BASE_ELEVATION + 1.5
 const RESERVOIR_CAPACITY: float = 260.0
 const CISTERN_CAPACITY: float = 340.0
 const WELL_RECHARGE_RATE: float = 0.5 ## from rare valley groundwater pockets
@@ -122,6 +130,15 @@ const SHADE_STRUCTURE_STRENGTH: float = 0.55 ## weaker than a mature date palm, 
 # Soil fertility (set by terrain type at generation)
 # ---------------------------------------------------------------------------
 const FERTILITY_GROWTH_FLOOR: float = 0.45 ## growth-rate multiplier on the poorest plantable ground
+
+# ---------------------------------------------------------------------------
+# UI layout
+# ---------------------------------------------------------------------------
+const UI_TOP_BAR_HEIGHT: float = 46.0
+const UI_BOTTOM_BAR_HEIGHT: float = 62.0
+const UI_SIDE_PANEL_WIDTH: float = 310.0
+const UI_INSPECTOR_WIDTH: float = 340.0
+const UI_INSPECTOR_HEIGHT: float = 300.0
 
 # ---------------------------------------------------------------------------
 # Construction
