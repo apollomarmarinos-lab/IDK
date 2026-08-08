@@ -56,6 +56,8 @@ static func generate(width: int, height: int, rng_seed: int) -> Dictionary:
 	var detail_noise := _make_noise(rng_seed + 11, FastNoiseLite.TYPE_PERLIN, 0.09, 3)
 	var meander_left := _make_noise(rng_seed + 101, FastNoiseLite.TYPE_PERLIN, 0.008, 2)
 	var meander_right := _make_noise(rng_seed + 202, FastNoiseLite.TYPE_PERLIN, 0.008, 2)
+	var peak_noise_left := _make_noise(rng_seed + 103, FastNoiseLite.TYPE_PERLIN, 0.025, 4)
+	var peak_noise_right := _make_noise(rng_seed + 203, FastNoiseLite.TYPE_PERLIN, 0.025, 4)
 	var dune_noise := _make_noise(rng_seed + 303, FastNoiseLite.TYPE_PERLIN, GameConfig.DUNE_FREQUENCY, 2)
 	var pavement_noise := _make_noise(rng_seed + 404, FastNoiseLite.TYPE_PERLIN, 0.03, 2)
 
@@ -74,6 +76,9 @@ static func generate(width: int, height: int, rng_seed: int) -> Dictionary:
 		var right_center: float = right_centers[y]
 		# The valley drains along its long axis toward the southern outlet.
 		var long_slope: float = (1.0 - float(y) / float(height)) * GameConfig.VALLEY_LONG_SLOPE
+		# Peak influence along each range's centerline, varies per-row to create distinct peaks.
+		var peak_left: float = (peak_noise_left.get_noise_1d(float(y)) + 1.0) * 0.5
+		var peak_right: float = (peak_noise_right.get_noise_1d(float(y)) + 1.0) * 0.5
 		for x in range(width):
 			var idx: int = y * width + x
 			var fall_left: float = clampf(1.0 - absf(float(x) - left_center) / (band * 0.5), 0.0, 1.0)
@@ -83,7 +88,12 @@ static func generate(width: int, height: int, rng_seed: int) -> Dictionary:
 
 			var ridge: float = (ridge_noise.get_noise_2d(float(x), float(y)) + 1.0) * 0.5
 			ridge = pow(ridge, 1.4) # sharpen crests, flatten the low ground
+			
+			# Apply peak modulation: stronger near centerline, fades toward edges
+			var peak_mod_left: float = 1.0 + (peak_left - 0.5) * 0.8 * fall_left
+			var peak_mod_right: float = 1.0 + (peak_right - 0.5) * 0.8 * fall_right
 			var mountain_h: float = mask * ridge * GameConfig.MOUNTAIN_HEIGHT_SCALE
+			mountain_h *= maxf(peak_mod_left, peak_mod_right)
 
 			var valley_center: float = (left_center + right_center) * 0.5
 			var valley_half: float = maxf(1.0, (right_center - left_center) * 0.5)
@@ -91,7 +101,9 @@ static func generate(width: int, height: int, rng_seed: int) -> Dictionary:
 			var floor_h: float = GameConfig.VALLEY_BASE_ELEVATION - GameConfig.VALLEY_BASIN_DEPTH * basin + long_slope
 
 			var h: float = floor_h + mountain_h
-			h += detail_noise.get_noise_2d(float(x), float(y)) * (0.5 + mask * 3.0)
+			# Add detail noise scaled by mask, but reduce it near peaks for smoother summits
+			var peak_smooth: float = 1.0 - clampf((maxf(fall_left, fall_right) - 0.3) / 0.7, 0.0, 1.0) * 0.4
+			h += detail_noise.get_noise_2d(float(x), float(y)) * (0.5 + mask * 3.0) * peak_smooth
 			elevation[idx] = h
 
 	# --- Pass 3: wadi network ---------------------------------------------
@@ -126,6 +138,9 @@ static func generate(width: int, height: int, rng_seed: int) -> Dictionary:
 			# stopping at a hard edge.
 			if t == TERRAIN_ALLUVIUM:
 				f *= clampf(0.6 + wadi * 0.6, 0.0, 1.0)
+			# Foothills (scree) get slightly higher fertility near the valley floor transition
+			if t == TERRAIN_SCREE and mask < 0.35:
+				f *= 1.15
 			fertility[idx] = f
 
 	# --- Pass 6: aquifers --------------------------------------------------
