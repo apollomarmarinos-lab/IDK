@@ -5,22 +5,17 @@ extends Control
 
 var _date_label: Label
 var _weather_label: Label
+var _water_label: Label
 var _inventory_label: Label
 var _speed_buttons: Array[Button] = []
 
 func _ready() -> void:
-	anchor_left = 0.0
-	anchor_right = 1.0
-	anchor_top = 0.0
-	anchor_bottom = 0.0
-	offset_right = 0.0
-	offset_bottom = 44.0
+	set_anchors_preset(Control.PRESET_TOP_WIDE)
+	offset_bottom = 46.0
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
 
 	var bar := PanelContainer.new()
-	bar.anchor_left = 0.0
-	bar.anchor_right = 1.0
-	bar.offset_bottom = 44.0
+	bar.set_anchors_preset(Control.PRESET_FULL_RECT)
 	bar.mouse_filter = Control.MOUSE_FILTER_STOP
 	add_child(bar)
 
@@ -33,11 +28,15 @@ func _ready() -> void:
 	row.add_child(_date_label)
 
 	_weather_label = Label.new()
-	_weather_label.custom_minimum_size = Vector2(260, 0)
+	_weather_label.custom_minimum_size = Vector2(280, 0)
 	row.add_child(_weather_label)
 
+	_water_label = Label.new()
+	_water_label.custom_minimum_size = Vector2(210, 0)
+	row.add_child(_water_label)
+
 	_inventory_label = Label.new()
-	_inventory_label.custom_minimum_size = Vector2(420, 0)
+	_inventory_label.custom_minimum_size = Vector2(360, 0)
 	row.add_child(_inventory_label)
 
 	var spacer := Control.new()
@@ -67,9 +66,10 @@ func _process(_delta: float) -> void:
 		var cx: int = WorldMap.width / 2
 		var cy: int = WorldMap.height / 2
 		deg = WorldMap.temperature[WorldMap.index_of(cx, cy)]
-	_weather_label.text = "%.0f C   Wind %.0f%% -> %s" % [
+	_weather_label.text = "%.0f C   Wind %.0f%% %s" % [
 		deg, ClimateSystem.wind_speed * 100.0, _wind_arrow(ClimateSystem.wind_direction)
 	]
+	_water_label.text = "Water stored: %.0f" % WaterSystem.total_stored_water()
 
 func _wind_arrow(dir: Vector2) -> String:
 	var angle: float = dir.angle()

@@ -43,8 +43,10 @@ func get_canopy_factor() -> float:
 		return 0.0
 	return get_growth_fraction() * clampf(health + 0.3, 0.0, 1.0)
 
-func advance_day() -> void:
-	age_days += 1.0
+## `growth_rate` folds in soil fertility and current health, so a stressed
+## plant on poor ground takes materially longer to reach maturity.
+func advance_day(growth_rate: float = 1.0) -> void:
+	age_days += maxf(0.0, growth_rate)
 	_recompute_stage()
 
 func _recompute_stage() -> void:

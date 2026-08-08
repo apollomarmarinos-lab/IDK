@@ -7,10 +7,12 @@ extends Camera2D
 @export var max_zoom: float = 3.0
 
 func _ready() -> void:
+	make_current()
 	var map_w: float = float(GameConfig.MAP_WIDTH * GameConfig.TILE_PIXEL_SIZE)
 	var map_h: float = float(GameConfig.MAP_HEIGHT * GameConfig.TILE_PIXEL_SIZE)
 	position = Vector2(map_w, map_h) * 0.5
-	zoom = Vector2(0.6, 0.6)
+	# Start zoomed out enough to see the valley and both ranges at once.
+	zoom = Vector2(0.35, 0.35)
 
 func _process(delta: float) -> void:
 	var dir := Vector2.ZERO
