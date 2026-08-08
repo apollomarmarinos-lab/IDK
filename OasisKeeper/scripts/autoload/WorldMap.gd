@@ -107,6 +107,7 @@ func generate(rng_seed: int = -1) -> void:
 
 	reservoir_target_level = PackedInt32Array()
 	reservoir_target_level.resize(size)
+	reservoir_target_level.fill(0)
 
 	EventBus.emit_signal("world_generated")
 
