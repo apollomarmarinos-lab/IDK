@@ -11,6 +11,7 @@ func _ready() -> void:
 	UILayout.bottom_right(self, GameConfig.UI_INSPECTOR_WIDTH,
 		GameConfig.UI_INSPECTOR_HEIGHT, GameConfig.UI_BOTTOM_BAR_HEIGHT)
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
+	visible = true
 
 	var panel := PanelContainer.new()
 	UILayout.fill(panel)

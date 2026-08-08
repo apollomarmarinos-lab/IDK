@@ -12,6 +12,7 @@ var _speed_buttons: Array[Button] = []
 func _ready() -> void:
 	UILayout.top_bar(self, GameConfig.UI_TOP_BAR_HEIGHT)
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
+	visible = true
 
 	var bar := PanelContainer.new()
 	UILayout.fill(bar)
