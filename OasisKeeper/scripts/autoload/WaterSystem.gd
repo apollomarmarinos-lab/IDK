@@ -10,6 +10,11 @@ extends Node
 ##      the higher to the lower one. Water therefore genuinely flows from
 ##      one canal tile to the next, downhill, and pools where the ground
 ##      levels out.
+##   2b. Above that, one hard rule: water never climbs a height level. A
+##      tile only ever pushes into a neighbour on its own level or lower,
+##      no matter how full it is. Head decides how fast water moves and
+##      between which tiles on a level; the level decides whether it may
+##      move at all. To get water up a step you terrace the step away.
 ##   3. A mountain canal tile sitting on an aquifer body draws from that
 ##      body's finite volume -- this is the only way water enters the map,
 ##      apart from wells over rare valley groundwater.
@@ -185,6 +190,14 @@ func _flow_pass() -> void:
 				continue
 			if not WorldMap.water_may_pass(idx_i, nidx):
 				continue # basin rim: only inlets exchange with the outside
+			# Water never climbs. Head alone does not guarantee this: a brim
+			# full channel's surface can stand above the floor of a channel a
+			# level higher up, and without this check it would push water up
+			# the step. Same level is fine -- that is what makes a run flow --
+			# strictly higher is refused outright, and the player grades the
+			# route with the terraform tools instead.
+			if WorldMap.height_differential(idx_i, nidx) < 0:
+				continue
 			if WorldMap.water[nidx] >= WorldMap.water_capacity(nidx):
 				continue
 			var diff: float = self_head - WorldMap.head(nidx)
@@ -256,6 +269,8 @@ func _irrigate() -> void:
 				continue
 			if not WorldMap.is_plantable_ground(nidx):
 				continue # bare rock holds no irrigable soil
+			if WorldMap.height_level(nidx) > WorldMap.height_level(idx_i):
+				continue # a canal cannot wet ground terraced above itself
 			var room: float = GameConfig.SOIL_WATER_CAPACITY - WorldMap.soil_moisture[nidx]
 			if room <= 0.0:
 				continue
@@ -291,6 +306,11 @@ func _diffuse_soil() -> void:
 			var diff: float = WorldMap.soil_moisture[idx_i] - WorldMap.soil_moisture[nidx]
 			if absf(diff) < 0.05:
 				continue
+			# Capillary spread obeys the same rule as open water: damp ground
+			# wets what is level with it or below it, never a terrace above.
+			var step: int = WorldMap.height_differential(idx_i, nidx)
+			if (diff > 0.0 and step < 0) or (diff < 0.0 and step > 0):
+				continue
 			var transfer: float = diff * GameConfig.SOIL_DIFFUSION_RATE
 			WorldMap.soil_moisture[idx_i] -= transfer
 			WorldMap.soil_moisture[nidx] += transfer
@@ -304,6 +324,32 @@ func _diffuse_soil() -> void:
 func notify_soil_dried(idx: int) -> void:
 	if WorldMap.soil_moisture[idx] <= SOIL_EPSILON:
 		_moist_soil.erase(idx)
+
+## Why a water structure is holding on to its water instead of passing it on,
+## phrased for the tile inspector. Returns "" when it has somewhere to send it.
+## Reading this out is what makes the no-uphill rule teachable rather than
+## mysterious: the answer is almost always "grade the route".
+func outflow_block_reason(idx: int) -> String:
+	if not WorldMap.conducts_water(idx):
+		return ""
+	var buf := PackedInt32Array([0, 0, 0, 0])
+	var count: int = WorldMap.get_neighbors4(idx, buf)
+	var connected: int = 0
+	var uphill: int = 0
+	for n in range(count):
+		var nidx: int = buf[n]
+		if not WorldMap.conducts_water(nidx):
+			continue
+		if not WorldMap.water_may_pass(idx, nidx):
+			continue
+		connected += 1
+		if WorldMap.height_differential(idx, nidx) < 0:
+			uphill += 1
+	if connected == 0:
+		return "Dead end - nothing connected to carry the water onward"
+	if uphill == connected:
+		return "Blocked: every connection leads uphill. Dig the route down to level %d." % WorldMap.water_level(idx)
+	return ""
 
 func get_active_tiles() -> Dictionary:
 	return _active

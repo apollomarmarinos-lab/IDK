@@ -136,6 +136,9 @@ const CANAL_FLOOR_DEPTH: float = 1.2 ## how far a dug canal floor sits below ter
 ## the valley floor so a tunnel always drains valley-ward. See
 ## WorldMap.floor_elevation().
 const TUNNEL_DATUM_ELEVATION: float = VALLEY_BASE_ELEVATION + 1.5
+## The same datum expressed in whole height levels, which is the unit the
+## no-uphill rule works in. See WorldMap.water_level().
+const TUNNEL_DATUM_LEVEL: int = int(TUNNEL_DATUM_ELEVATION / HEIGHT_STEP)
 ## Reservoirs and cisterns are multi-tile basins. Every tile of the
 ## footprint is a normal water tile, so the existing flow model makes them
 ## behave like one pool for free -- no special-case shared volume needed.

@@ -235,12 +235,27 @@ func can_terraform(idx: int, delta_levels: int) -> bool:
 	var t: int = terrain_type[idx]
 	if t == Terrain.ROCK or t == Terrain.SCREE:
 		return false
-	if structure_type[idx] != Structure.NONE:
+	if not _terraformable_structure(idx):
 		return false
 	if PlantSystem.plants.has(idx):
 		return false
 	var next_offset: int = terraform_offset[idx] + delta_levels
 	return next_offset <= GameConfig.TERRAFORM_MAX_RAISE and next_offset >= -GameConfig.TERRAFORM_MAX_DIG
+
+## A channel may be re-graded where it lies -- deepening the cut under a canal
+## you have already dug is the whole job of grading a run, and forcing the
+## player to demolish and rebuild it just to move it down a level would make
+## the no-uphill rule miserable to work with. A basin is a single levelled
+## structure spanning several tiles, so terracing one of its tiles would tilt
+## it; those stay off limits.
+func _terraformable_structure(idx: int) -> bool:
+	var s: int = structure_type[idx]
+	if s == Structure.NONE:
+		return true
+	if structure_owner[idx] >= 0:
+		return false
+	return s == Structure.CANAL_OPEN or s == Structure.CANAL_COVERED \
+		or s == Structure.CANAL_MOUNTAIN or s == Structure.GATE
 
 ## Why a terraform was refused, for the build panel.
 func terraform_hint(idx: int, delta_levels: int) -> String:
@@ -251,7 +266,7 @@ func terraform_hint(idx: int, delta_levels: int) -> String:
 		return "Cannot terraform mountain rock"
 	if t == Terrain.SCREE:
 		return "Cannot terraform the foothills"
-	if structure_type[idx] != Structure.NONE:
+	if not _terraformable_structure(idx):
 		return "Clear the structure first"
 	if PlantSystem.plants.has(idx):
 		return "Remove the plant first"
@@ -270,30 +285,46 @@ func apply_terraform(idx: int, delta_levels: int) -> bool:
 	EventBus.emit_signal("tile_changed", idx)
 	return true
 
+## The height level the *water* in this tile sits at -- the level of the
+## channel floor, not of the ground surface above it. This is the single
+## number the no-uphill rule compares, so everything that can carry water
+## has to agree on it.
+##
+## For an open trench it is simply the terraced ground level: dig a canal
+## across a dune and the canal is at the dune's level, which is why water
+## will not run through it until the route is graded down.
+##
+## The two *buried* types -- mountain tunnels and covered canals -- are bored
+## to a gradient rather than following the surface, so their level is capped
+## at the tunnel datum. This is the qanat principle and it is load-bearing:
+## without it a channel driven out of a range would have to climb the ridge
+## crest and then the scree apron, and water would never reach the valley at
+## all. On valley ground the cap does not bind, so buried and open channels
+## behave identically there.
+func water_level(idx: int) -> int:
+	var s: int = structure_type[idx]
+	if s == Structure.CANAL_MOUNTAIN or s == Structure.CANAL_COVERED:
+		return mini(height_level(idx), GameConfig.TUNNEL_DATUM_LEVEL)
+	return height_level(idx)
+
+## How far tile `to` sits below tile `from`, in whole height levels.
+## Positive means downhill; water is only ever allowed to move that way.
+func height_differential(from_idx: int, to_idx: int) -> int:
+	return water_level(from_idx) - water_level(to_idx)
+
 ## Elevation of the channel floor. Dug structures sit below grade, which is
 ## what makes water run downhill along a canal instead of pooling in place.
 ##
-## The two *buried* channel types -- mountain tunnels and covered canals --
-## are cut to a gradient rather than following the ground surface, so their
-## floor is capped at a datum just above the valley floor. This is the qanat
-## principle, and it is load-bearing for the whole game: without it a
-## channel driven out of a range would have to climb the ridge crest and
-## then the scree apron of the foothills, and water would never reach the
-## valley at all. On flat valley ground the cap never binds, so open and
-## buried channels behave identically there.
-##
-## Open canals deliberately do NOT get this: they are trenches, they follow
-## the ground, and they cannot cross high land. That is the cost of the
-## cheaper tool.
+## The floor is snapped to the tile's whole height level rather than to the
+## continuous heightfield. That is deliberate: it means every tile on one
+## level shares exactly one floor, so water crosses a level freely and only
+## ever stalls at a real step. Reading the raw heightfield instead would give
+## every tile a slightly different floor and turn the natural dune noise into
+## thousands of invisible micro-dams.
 func floor_elevation(idx: int) -> float:
-	var s: int = structure_type[idx]
-	var ground: float = terrain_height(idx)
-	if s == Structure.NONE:
-		return ground
-	var dug: float = ground - GameConfig.CANAL_FLOOR_DEPTH
-	if s == Structure.CANAL_MOUNTAIN or s == Structure.CANAL_COVERED:
-		return minf(dug, GameConfig.TUNNEL_DATUM_ELEVATION)
-	return dug
+	if structure_type[idx] == Structure.NONE:
+		return terrain_height(idx)
+	return float(water_level(idx)) * GameConfig.HEIGHT_STEP - GameConfig.CANAL_FLOOR_DEPTH
 
 ## Hydraulic head: floor height plus the depth of water standing on it.
 func head(idx: int) -> float:

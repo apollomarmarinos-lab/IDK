@@ -19,14 +19,55 @@ var _gate_toggled: bool = false
 var _reservoir_origin: int = -1
 var _basin_checked: bool = false
 
+var _host: Node = null
+
 static func run(host: Node) -> void:
 	var t := SelfTest.new()
+	t._host = host
 	host.add_child(t)
 
 func _ready() -> void:
+	_test_camera_drag()
 	_build()
 	EventBus.plant_died.connect(func(idx, id): print("SELFTEST plant_died: ", id))
 	EventBus.plant_harvested.connect(func(idx, id, amount): print("SELFTEST harvested %.1f %s" % [amount, id]))
+
+## Left-drag has to grab the map with Inspect up, and has to leave the map
+## alone once a build tool is selected -- otherwise laying out a canal run
+## would fling the camera across the valley. Driving the camera's handler with
+## synthesised events tests exactly that, with no window needed.
+func _test_camera_drag() -> void:
+	if _host == null:
+		return
+	var cam: Camera2D = _host.get_node_or_null("Camera2D")
+	if cam == null:
+		print("SELFTEST FAIL: no Camera2D")
+		return
+	var moved_with_inspect: Vector2 = _drag_camera(cam, false)
+	var moved_with_tool: Vector2 = _drag_camera(cam, true)
+	print("SELFTEST camera left-drag: inspect moved %s, build tool moved %s -> %s" % [
+		moved_with_inspect, moved_with_tool,
+		"OK" if moved_with_inspect.length() > 1.0 and moved_with_tool.length() < 0.001 else "FAIL"])
+
+func _drag_camera(cam: Camera2D, build_tool: bool) -> Vector2:
+	cam.build_tool_active = build_tool
+	var before: Vector2 = cam.position
+	var press := InputEventMouseButton.new()
+	press.button_index = MOUSE_BUTTON_LEFT
+	press.pressed = true
+	press.position = Vector2(400.0, 300.0)
+	cam._unhandled_input(press)
+	var motion := InputEventMouseMotion.new()
+	motion.relative = Vector2(-40.0, -30.0)
+	cam._unhandled_input(motion)
+	var moved: Vector2 = cam.position - before
+	var release := InputEventMouseButton.new()
+	release.button_index = MOUSE_BUTTON_LEFT
+	release.pressed = false
+	release.position = press.position
+	cam._unhandled_input(release)
+	cam.position = before
+	return moved
 
 func _build() -> void:
 	# 1. Find an aquifer body inside the rock.
@@ -225,17 +266,113 @@ func _process(_delta: float) -> void:
 				if WorldMap.is_inlet[i] == 1:
 					inlets += 1
 		print("SELFTEST basin: %d tiles, %d inlets" % [tiles, inlets])
+		_test_grading()
 
 	if _frame % 600 != 0 or _chain.is_empty():
 		return
 	# Sample water depth along the run: it should be highest at the aquifer
 	# end and taper downstream, proving tile-to-tile flow.
 	print("SELFTEST t=%d  open   %s" % [_frame, _sample(_chain)])
+	print("SELFTEST t=%d  levels %s" % [_frame, _levels(_chain)])
 	if not _covered_chain.is_empty():
 		print("SELFTEST t=%d  covered %s" % [_frame, _sample(_covered_chain)])
+		print("SELFTEST t=%d  levels %s" % [_frame, _levels(_covered_chain)])
 	if _aquifer_body >= 0:
 		print("SELFTEST t=%d  aquifer %.0f/%.0f" % [
 			_frame, WorldMap.aquifer_volume[_aquifer_body], WorldMap.aquifer_max_volume[_aquifer_body]])
+	_audit_uphill()
+
+## Two consequences of the no-uphill rule that need to hold up in practice:
+## how much of a natural route actually steps up (the grading burden), and
+## that a channel already in the ground can still be cut down a level, so a
+## stalled run can be fixed without demolishing it.
+func _test_grading() -> void:
+	if _chain.is_empty():
+		return
+	var steps_up: int = 0
+	for i in range(1, _chain.size()):
+		if WorldMap.height_level(_chain[i]) > WorldMap.height_level(_chain[i - 1]):
+			steps_up += 1
+	print("SELFTEST grading burden: %d of %d run tiles step up" % [steps_up, _chain.size()])
+
+	var canal_tile: int = -1
+	for idx in _chain:
+		# Out on the valley floor: the foothill apron refuses terracing
+		# whether or not a channel is on it, which would prove nothing here.
+		if WorldMap.structure_type[idx] == WorldMap.Structure.CANAL_OPEN \
+				and WorldMap.terrain_type[idx] != WorldMap.Terrain.SCREE:
+			canal_tile = idx
+			break
+	if canal_tile < 0:
+		return
+	var before: int = WorldMap.height_level(canal_tile)
+	var ok: bool = WorldMap.apply_terraform(canal_tile, -1)
+	print("SELFTEST regrade a built canal: ok=%s level %d -> %d (hint '%s')" % [
+		ok, before, WorldMap.height_level(canal_tile), WorldMap.terraform_hint(canal_tile, -1)])
+	if _reservoir_origin >= 0:
+		print("SELFTEST regrade a basin refused: '%s'" % WorldMap.terraform_hint(_reservoir_origin, -1))
+
+## Decisive check that water never climbs.
+##
+## Flood-filling outward from the tiles that draw water from the world, but
+## refusing to step up a height level, gives exactly the set of tiles water is
+## allowed to reach. Any tile holding water outside that set can only have got
+## it by going uphill somewhere, so a non-zero count here is the bug the rule
+## exists to prevent.
+func _audit_uphill() -> void:
+	var size: int = WorldMap.width * WorldMap.height
+	var reachable: Dictionary = {}
+	var frontier: Array[int] = []
+	for i in range(size):
+		if not WorldMap.conducts_water(i):
+			continue
+		var s: int = WorldMap.structure_type[i]
+		var is_source: bool = (s == WorldMap.Structure.CANAL_MOUNTAIN and WorldMap.has_aquifer(i)) \
+			or (s == WorldMap.Structure.WELL and WorldMap.rare_groundwater[i] > 0.0)
+		if is_source:
+			reachable[i] = true
+			frontier.append(i)
+
+	var buf := PackedInt32Array([0, 0, 0, 0])
+	while not frontier.is_empty():
+		var idx: int = frontier.pop_back()
+		var count: int = WorldMap.get_neighbors4(idx, buf)
+		for n in range(count):
+			var nidx: int = buf[n]
+			if reachable.has(nidx):
+				continue
+			if not WorldMap.conducts_water(nidx):
+				continue
+			if not WorldMap.water_may_pass(idx, nidx):
+				continue
+			if WorldMap.height_differential(idx, nidx) < 0:
+				continue
+			reachable[nidx] = true
+			frontier.append(nidx)
+
+	var wet: int = 0
+	var violations: int = 0
+	var worst: int = -1
+	for i in range(size):
+		if not WorldMap.conducts_water(i) or WorldMap.water[i] <= 0.01:
+			continue
+		wet += 1
+		if not reachable.has(i):
+			violations += 1
+			if worst < 0:
+				worst = i
+	var detail: String = ""
+	if worst >= 0:
+		detail = " first at %s (level %d)" % [WorldMap.coords_of(worst), WorldMap.water_level(worst)]
+	print("SELFTEST uphill audit: %d wet tiles, %d unreachable without climbing%s -> %s" % [
+		wet, violations, detail, "OK" if violations == 0 else "FAIL"])
+
+func _levels(chain: PackedInt32Array) -> String:
+	var samples: Array[String] = []
+	for i in range(0, chain.size(), maxi(1, chain.size() / 6)):
+		samples.append(str(WorldMap.water_level(chain[i])))
+	samples.append("end=%d" % WorldMap.water_level(chain[chain.size() - 1]))
+	return "[" + ", ".join(samples) + "]"
 
 func _sample(chain: PackedInt32Array) -> String:
 	var samples: Array[String] = []

@@ -1,5 +1,12 @@
 extends Camera2D
-## WASD/arrow-key panning and scroll-wheel zoom.
+## Grab-to-drag panning, WASD/arrow keys, edge scrolling and scroll-wheel zoom.
+##
+## Left-drag grabs the map, which is what the hand expects. It cannot do that
+## unconditionally, because left-drag is also how a canal run is laid out, so
+## MainController flips `build_tool_active` as the tool changes: with the
+## Inspect tool the left button drags the map, with a build tool it builds.
+## The right and middle buttons drag the map whatever tool is selected, so the
+## map is always grabbable without putting the tool down.
 
 @export var pan_speed: float = 600.0
 @export var zoom_speed: float = 0.1
@@ -8,7 +15,12 @@ extends Camera2D
 ## Screen margin, in pixels, where the cursor starts scrolling the map.
 @export var edge_scroll_margin: float = 14.0
 
-var _panning: bool = false
+## Set by MainController whenever the selected tool changes. While a build
+## tool is up, the left button belongs to that tool.
+var build_tool_active: bool = false
+
+## Which mouse button is currently dragging the map, or -1 for none.
+var _pan_button: int = -1
 
 func _ready() -> void:
 	make_current()
@@ -45,20 +57,35 @@ func _unhandled_input(event: InputEvent) -> void:
 			_zoom_by(1.0 + zoom_speed)
 		elif mb.button_index == MOUSE_BUTTON_WHEEL_DOWN and mb.pressed:
 			_zoom_by(1.0 - zoom_speed)
-		elif mb.button_index == MOUSE_BUTTON_MIDDLE:
-			# Middle-drag pans. Left is the build tool and right cancels it,
-			# so the middle button is the one left free for grabbing the map.
-			_panning = mb.pressed
-	elif event is InputEventMouseMotion and _panning:
+		elif mb.button_index == MOUSE_BUTTON_LEFT:
+			if mb.pressed:
+				if not build_tool_active and not _over_ui(mb.position):
+					_pan_button = MOUSE_BUTTON_LEFT
+			elif _pan_button == MOUSE_BUTTON_LEFT:
+				_pan_button = -1
+		elif mb.button_index == MOUSE_BUTTON_RIGHT or mb.button_index == MOUSE_BUTTON_MIDDLE:
+			if mb.pressed:
+				if not _over_ui(mb.position):
+					_pan_button = mb.button_index
+			elif _pan_button == mb.button_index:
+				_pan_button = -1
+	elif event is InputEventMouseMotion and _pan_button >= 0:
 		# Divide by zoom so the ground keeps pace with the cursor at any
 		# zoom level -- otherwise dragging feels sluggish zoomed out and
 		# twitchy zoomed in.
 		position -= event.relative / zoom.x
 
+## The top and bottom bars are opaque UI; a drag that starts on one of them is
+## the player using the menu, not reaching for the map.
+func _over_ui(screen_pos: Vector2) -> bool:
+	var vp: Vector2 = get_viewport_rect().size
+	return screen_pos.y < GameConfig.UI_TOP_BAR_HEIGHT \
+		or screen_pos.y > vp.y - GameConfig.UI_BOTTOM_BAR_HEIGHT
+
 ## Cursor near a screen edge nudges the camera that way, the usual RTS
-## behaviour. Ignored while middle-dragging, which would fight it.
+## behaviour. Ignored while dragging, which would fight it.
 func _edge_scroll_direction() -> Vector2:
-	if _panning:
+	if _pan_button >= 0:
 		return Vector2.ZERO
 	var vp: Vector2 = get_viewport_rect().size
 	var m: Vector2 = get_viewport().get_mouse_position()

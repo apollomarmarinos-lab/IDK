@@ -64,14 +64,21 @@ The build UI is in two parts:
 Inspect and Demolish are direct tools -- they select immediately and close
 the panel.
 
-- **Left click / drag** on the map: apply the selected tool.
-- **Middle-drag**: pan the map. Cursor at a screen edge also scrolls.
+- **Left-drag**: grab and drag the map. This is the default, because it is
+  the drag everyone reaches for first.
+- **Left click / drag** on the map with a build tool selected: apply that
+  tool. A build tool takes the left button over from the camera for as long
+  as it is selected, so the map is dragged with the **right or middle
+  button** instead -- those work whatever tool is up. Cursor at a screen edge
+  also scrolls.
 - Canals and terraform tools **drag as an L-shaped run**: press at the start,
   drag to the end, and the route previews tile by tile (green where it can
-  build, red where it cannot) before committing on release.
+  build, red where it cannot) before committing on release. Orange chevrons
+  mark tiles where the route **steps up a height level** -- water will not
+  climb those, so grade them out with Dig Out.
 - **R** cycles a basin's footprint (3x3 / 3x5 / 5x3) while Reservoir or
   Cistern is selected.
-- **Right click**: back to Inspect.
+- **Right click** (without dragging): back to Inspect.
 - **Number keys**: pick a category (shown on each button). While a category
   is open, **Q/W/E** pick items within it.
 - **Arrow keys / WASD**: pan. **Scroll wheel**: zoom.
@@ -117,9 +124,29 @@ Two details in that loop matter more than they look:
   than re-checked every tick. On a large network most tiles are idle at any
   moment, and this is what keeps that affordable.
 
-Water runs along a channel, pools where the ground flattens, and will not
-climb a rise. The valley slopes gently from north to south, giving the whole
-map a consistent downhill direction to work with.
+**Water never climbs a height level.** Head decides how fast water moves and
+between which tiles on a level; the *level* decides whether it may move at
+all. A tile only ever pushes into a neighbour on its own level or lower, no
+matter how full it gets -- `WorldMap.height_differential()` is checked before
+head is even looked at, and the same rule governs a canal wetting the soil
+beside it and damp soil spreading to its neighbours. Water runs along a
+channel, pools where the ground flattens, and stops dead at the first step
+up. The valley slopes gently from north to south, giving the whole map a
+consistent downhill direction to work with.
+
+To make that rule mean something concrete, a channel's floor is snapped to
+its tile's whole height level rather than to the raw heightfield. Every tile
+on one level then shares exactly one floor, so water crosses a level freely
+and only ever stalls at a real step -- reading the continuous heightfield
+instead would give every tile a slightly different floor and turn the natural
+dune noise into thousands of invisible micro-dams.
+
+The consequence is that laying an open canal is a two-step job: run the
+route, look at the orange chevrons on the preview, and drag **Dig Out** along
+the same line to cut the rises away. Terraforming works on tiles that already
+carry a canal precisely so a stalled run can be re-graded without tearing it
+up. When a channel is holding water and going nowhere, the tile inspector
+says why and which level to dig to.
 
 ## Height levels and terraforming
 
@@ -156,6 +183,14 @@ at a datum just above the valley floor -- the qanat principle. Without that,
 a channel leaving a range would have to climb the ridge crest and then the
 scree apron of the foothills, and water would never reach the valley at all.
 On flat valley ground the cap never binds and both behave identically.
+
+The no-uphill rule works on that same capped level (`WorldMap.water_level()`,
+which is the ground level for a trench and the tunnel datum for a buried
+conduit), which is what lets the two rules coexist: a qanat runs level under
+rising ground without the height check reading it as water climbing a hill,
+while an open trench on the surface is held to the surface it sits on. It
+also means a tunnel can only be opened out into an open canal once the ground
+has dropped to the datum -- on the foothill apron you have to stay covered.
 
 You can *see* this: canal tiles show their fill level directly (the stream
 widens and deepens in colour as the tile fills, and an empty channel shows

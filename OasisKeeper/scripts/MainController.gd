@@ -8,6 +8,7 @@ extends Node2D
 @onready var build_menu: Control = $UI/BuildMenu
 @onready var tile_inspector: Control = $UI/TileInspector
 @onready var loading_screen: Control = $UI/LoadingScreen
+@onready var camera: Camera2D = $Camera2D
 
 var current_tool: StringName = &"inspect"
 var selected_plant_id: StringName = &""
@@ -18,6 +19,9 @@ var _drag_anchor: int = -1
 var _drag_path: PackedInt32Array = PackedInt32Array()
 ## Tools laid out as a line rather than painted tile by tile.
 const LINE_TOOLS := [&"canal_open", &"canal_covered", &"raise_ground", &"lower_ground"]
+## How far the cursor may travel and still count as a click rather than a drag.
+const CLICK_SLOP: float = 6.0
+var _right_press_pos: Vector2 = Vector2.ZERO
 
 func _ready() -> void:
 	randomize()
@@ -54,21 +58,30 @@ func _unhandled_input(event: InputEvent) -> void:
 		var mb: InputEventMouseButton = event
 		if mb.button_index == MOUSE_BUTTON_LEFT:
 			if mb.pressed:
-				_dragging = true
 				_painted_this_drag.clear()
 				if _is_line_tool():
 					# Line tools commit on release, so the whole run can be
 					# previewed and re-aimed before anything is built.
+					_dragging = true
 					_drag_anchor = _tile_at_mouse()
 					_update_drag_path()
 				else:
+					# With Inspect up the left button belongs to the camera,
+					# so the click still selects a tile but the motion that
+					# follows drags the map instead of painting over it.
+					_dragging = not _left_drag_pans()
 					_apply_tool_at_mouse()
 			else:
 				_dragging = false
 				if _is_line_tool():
 					_commit_drag_path()
-		elif mb.button_index == MOUSE_BUTTON_RIGHT and mb.pressed:
-			build_menu.select_tool_externally(&"inspect")
+		elif mb.button_index == MOUSE_BUTTON_RIGHT:
+			# Right-drag pans (the camera handles the motion), so only a right
+			# button that has not travelled counts as "put the tool down".
+			if mb.pressed:
+				_right_press_pos = mb.position
+			elif mb.position.distance_to(_right_press_pos) <= CLICK_SLOP:
+				build_menu.select_tool_externally(&"inspect")
 
 func _tile_at_mouse() -> int:
 	var world_pos: Vector2 = get_global_mouse_position()
@@ -123,6 +136,11 @@ func _apply_tool_to(idx: int) -> void:
 func _is_line_tool() -> bool:
 	return LINE_TOOLS.has(current_tool)
 
+## True when nothing is being built, in which case the left button is free to
+## grab the map -- the drag most people reach for first.
+func _left_drag_pans() -> bool:
+	return current_tool == &"inspect"
+
 ## Builds the L-shaped route between the drag anchor and the cursor. The
 ## dominant axis is walked first, which is what makes a drag feel like it
 ## follows the direction you started in.
@@ -164,6 +182,7 @@ func _commit_drag_path() -> void:
 
 func _on_tool_selected(tool_name: StringName) -> void:
 	current_tool = tool_name
+	camera.build_tool_active = not _left_drag_pans()
 	# Dropping a half-drawn line when the tool changes avoids building the
 	# previous tool's route with the new tool.
 	_drag_path = PackedInt32Array()

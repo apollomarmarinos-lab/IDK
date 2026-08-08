@@ -581,6 +581,16 @@ func _draw_plant(layer: Node2D, p: PlantInstance, x: int, y: int) -> void:
 # Cursor / selection
 # ---------------------------------------------------------------------------
 
+## A chevron pointing up the step, drawn on a previewed route tile that sits
+## higher than the one before it -- the point where the water would stop.
+func _draw_step_up_marker(layer: Node2D, px: int, py: int) -> void:
+	var o := Vector2(float(px) * T, float(py) * T)
+	layer.draw_rect(Rect2(o.x, o.y, T, T), Color(0.98, 0.55, 0.15, 0.42))
+	var c: Color = Color(1.0, 0.85, 0.35)
+	var w: float = maxf(2.0, T * 0.07)
+	layer.draw_line(o + Vector2(T * 0.28, T * 0.62), o + Vector2(T * 0.5, T * 0.34), c, w)
+	layer.draw_line(o + Vector2(T * 0.72, T * 0.62), o + Vector2(T * 0.5, T * 0.34), c, w)
+
 func _draw_selection() -> void:
 	if WorldMap.width == 0:
 		return
@@ -589,12 +599,18 @@ func _draw_selection() -> void:
 	# Preview of an L-shaped build run: each tile shows whether it would
 	# actually take the structure, so a blocked route is obvious before
 	# committing to it.
-	for idx in drag_path:
+	for i in range(drag_path.size()):
+		var idx: int = drag_path[i]
 		var px: int = idx % WorldMap.width
 		var py: int = idx / WorldMap.width
 		var ok: bool = ghost_structure < 0 or BuildSystem.can_place(idx, ghost_structure)
 		var fill: Color = Color(0.35, 0.95, 0.45, 0.30) if ok else Color(0.95, 0.3, 0.25, 0.30)
 		layer.draw_rect(Rect2(float(px) * T, float(py) * T, T, T), fill)
+		# Water will not climb, so a run is only useful if it never steps up.
+		# Marking the rises while the route is still a preview is the whole
+		# difference between "my canal is broken" and "grade those two tiles".
+		if i > 0 and WorldMap.height_level(idx) > WorldMap.height_level(drag_path[i - 1]):
+			_draw_step_up_marker(layer, px, py)
 	# Multi-tile buildings preview their whole footprint, not just the cursor
 	# tile, so it is clear how much room they need before committing.
 	if hovered_tile >= 0 and ghost_structure >= 0:

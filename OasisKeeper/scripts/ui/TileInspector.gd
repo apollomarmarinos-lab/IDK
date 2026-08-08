@@ -59,11 +59,18 @@ func _process(_delta: float) -> void:
 		lines.append("[b]%s[/b]" % BuildSystem.structure_name(WorldMap.structure_type[idx]))
 		var cap: float = WorldMap.water_capacity(idx)
 		lines.append("Water: %.2f / %.0f  (%.0f%% full)" % [WorldMap.water[idx], cap, WorldMap.water[idx] / cap * 100.0])
+		var wl: int = WorldMap.water_level(idx)
+		if wl != WorldMap.height_level(idx):
+			lines.append("[color=#66ddff]Bored to gradient: water runs at level %d[/color]" % wl)
 		var flow := Vector2(WorldMap.flow_x[idx], WorldMap.flow_y[idx])
 		if flow.length() > 0.004:
 			lines.append("Flowing %s" % _direction_name(flow))
 		else:
-			lines.append("[color=#999999]Not flowing (level)[/color]")
+			var reason: String = WaterSystem.outflow_block_reason(idx)
+			if reason == "":
+				lines.append("[color=#999999]Not flowing (level)[/color]")
+			else:
+				lines.append("[color=#dd8855]%s[/color]" % reason)
 		lines.append("Evaporation: %s" % ("exposed to sun" if WorldMap.is_open_to_sky(idx) else "[color=#7fdc7f]covered, negligible[/color]"))
 		if WorldMap.structure_type[idx] == WorldMap.Structure.GATE:
 			lines.append("Gate is %s" % ("[color=#66dd66]OPEN[/color]" if WorldMap.gate_open[idx] == 1 else "[color=#dd6666]CLOSED[/color]"))

@@ -23,12 +23,12 @@ const CATEGORIES: Array = [
 	},
 	{
 		"id": &"channels", "label": "Channels", "key": "2", "kind": "category",
-		"blurb": "Move water from the mountains to your fields.",
+		"blurb": "Move water from the mountains to your fields. It only ever runs downhill.",
 		"tools": [
 			{"id": &"canal_open", "label": "Open Canal", "key": "Q",
-			 "desc": "Quick to dig, and it waters the soil either side of it -- this is how you actually irrigate.\n\nFully exposed, so it loses water to the sun: worst in summer, in wind, and out of shade.\n\nDug into mountain rock it automatically becomes a Mountain Tunnel."},
+			 "desc": "Quick to dig, and it waters the soil either side of it -- this is how you actually irrigate.\n\nFully exposed, so it loses water to the sun: worst in summer, in wind, and out of shade.\n\nIt follows the ground, so it only carries water along tiles that step down or stay level. Grade the route with Dig Out first.\n\nDug into mountain rock it automatically becomes a Mountain Tunnel."},
 			{"id": &"canal_covered", "label": "Covered Canal", "key": "W",
-			 "desc": "Twice the digging, but a roofed channel loses almost nothing to evaporation. Use it for the long haul from the mountains.\n\nIt does NOT wet the ground beside it -- it only delivers water to wherever you open it up again.\n\nDug into mountain rock it automatically becomes a Mountain Tunnel."},
+			 "desc": "Twice the digging, but a roofed channel loses almost nothing to evaporation. Use it for the long haul from the mountains.\n\nIt does NOT wet the ground beside it -- it only delivers water to wherever you open it up again.\n\nUnlike an open trench it is bored to a gradient rather than following the surface, so it carries water out under the foothills without needing the ground graded first. That is what gets water off the mountain.\n\nDug into mountain rock it automatically becomes a Mountain Tunnel."},
 			{"id": &"gate", "label": "Gate", "key": "E",
 			 "desc": "Fitted into an existing channel. Click a finished gate to open or close it, splitting the network so you can send water where you want it."},
 		],
@@ -55,12 +55,12 @@ const CATEGORIES: Array = [
 	},
 	{
 		"id": &"terraform", "label": "Terraform", "key": "5", "kind": "category",
-		"blurb": "Reshape the valley floor a level at a time.",
+		"blurb": "Reshape the valley floor a level at a time. Water never climbs one.",
 		"tools": [
 			{"id": &"raise_ground", "label": "Raise Ground", "key": "Q",
-			 "desc": "Builds the tile up by one height level.\n\nUse it to dam a hollow, or to force a channel to run somewhere else -- water will not climb a rise."},
+			 "desc": "Builds the tile up by one height level.\n\nUse it to dam a hollow, or to force a channel to run somewhere else -- water will not climb a rise, however full the channel below it gets."},
 			{"id": &"lower_ground", "label": "Dig Out", "key": "W",
-			 "desc": "Cuts the tile down by one height level.\n\nThe practical use is grade: dig a line of tiles descending away from your source and an open canal laid along it will actually carry water, instead of pooling where the ground flattens."},
+			 "desc": "Cuts the tile down by one height level.\n\nThis is how a run is graded. Water only ever moves to a tile on its own level or lower, so a canal stalls at the first step up -- the orange chevrons on a build preview mark exactly those tiles. Drag Dig Out along the same line to cut them down.\n\nWorks on tiles that already carry a canal, so a finished run can be re-graded without tearing it up."},
 		],
 	},
 	{
