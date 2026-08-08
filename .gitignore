@@ -1,16 +1,14 @@
 ```
 # Godot-specific ignores
 *.import
-*.remap
+*.uid
 export_presets.cfg
-.autoload_register
-.editor
 .godot/
 
 # Compiled and build artifacts
 *.so
-*.dylib
 *.dll
+*.dylib
 *.exe
 *.o
 *.obj
@@ -25,15 +23,21 @@ venv/
 __pycache__/
 .mypy_cache/
 .pytest_cache/
-.coverage
-coverage/
-htmlcov/
 target/
 .gradle/
 build/
 dist/
 
-# Environment
+# Logs and temp files
+*.log
+*.tmp
+*.swp
+*.swo
+*.bak
+*.~
+*~
+
+# Environment variables
 .env
 .env.local
 .env.*
@@ -43,12 +47,8 @@ dist/
 .idea/
 *.swp
 *.swo
-*.tmp
 
-# Logs
-*.log
-
-# System
+# OS-specific
 .DS_Store
 Thumbs.db
 ```
