@@ -16,20 +16,22 @@ script = ExtResource("2")
 
 [node name="TerrainSprite" type="Sprite2D" parent="World"]
 
-[node name="MoistureWaterSprite" type="Sprite2D" parent="World"]
+[node name="MoistureSprite" type="Sprite2D" parent="World"]
 
 [node name="ShadeSprite" type="Sprite2D" parent="World"]
 
-[node name="UndergroundSprite" type="Sprite2D" parent="World"]
+[node name="OverlaySprite" type="Sprite2D" parent="World"]
 
-[node name="PlantMultiMesh" type="MultiMeshInstance2D" parent="World"]
+[node name="StructuresLayer" type="Node2D" parent="World"]
 
-[node name="BuildingsLayer" type="Node2D" parent="World"]
+[node name="PlantsLayer" type="Node2D" parent="World"]
 
-[node name="SelectionMarker" type="Node2D" parent="World"]
+[node name="FlowLayer" type="Node2D" parent="World"]
+
+[node name="SelectionLayer" type="Node2D" parent="World"]
 
 [node name="RefreshTimer" type="Timer" parent="World"]
-wait_time = 0.5
+wait_time = 0.2
 autostart = true
 
 [node name="NightOverlay" type="CanvasModulate" parent="."]
@@ -37,18 +39,14 @@ script = ExtResource("3")
 
 [node name="Camera2D" type="Camera2D" parent="."]
 script = ExtResource("4")
-current = true
 
 [node name="UI" type="CanvasLayer" parent="."]
 
 [node name="HUD" type="Control" parent="UI"]
-anchors_preset = 0
 script = ExtResource("5")
 
 [node name="BuildMenu" type="Control" parent="UI"]
-anchors_preset = 0
 script = ExtResource("6")
 
 [node name="TileInspector" type="Control" parent="UI"]
-anchors_preset = 0
 script = ExtResource("7")

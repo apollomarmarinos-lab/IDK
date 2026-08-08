@@ -66,7 +66,7 @@ func _update_temperature() -> void:
 		var t: float = base_temp
 		t -= WorldMap.elevation[i] * GameConfig.ELEVATION_LAPSE_RATE
 		t -= WorldMap.shade[i] * GameConfig.SHADE_COOLING
-		if WorldMap.surface_water[i] > 0.5 or WorldMap.soil_moisture[i] > 1.0:
+		if WorldMap.water[i] > 0.5 or WorldMap.soil_moisture[i] > 1.0:
 			t -= GameConfig.WATER_COOLING
 		WorldMap.temperature[i] = t
 
@@ -113,24 +113,21 @@ func _evaporation_multiplier(idx: int) -> float:
 	return temp_factor * wind_factor * shade_factor * humidity_factor
 
 func _evaporate_surface() -> void:
-	var surface: Dictionary = WaterSystem.get_active_surface_tiles()
-	var underground: Dictionary = WaterSystem.get_active_underground_tiles()
-	for idx in surface.keys():
+	for idx in WaterSystem.get_active_tiles().keys():
 		var idx_i: int = idx
-		if WorldMap.surface_water[idx_i] <= 0.0:
+		if WorldMap.water[idx_i] <= 0.0:
 			continue
-		var mult: float = _evaporation_multiplier(idx_i)
-		var lost: float = WorldMap.surface_water[idx_i] * GameConfig.BASE_EVAPORATION_COEFF * mult
-		lost = minf(lost, WorldMap.surface_water[idx_i])
-		WorldMap.surface_water[idx_i] -= lost
-		WorldMap.air_moisture[idx_i] = clampf(WorldMap.air_moisture[idx_i] + lost * GameConfig.MOISTURE_RELEASE_COEFF, 0.0, 1.0)
-	for idx in underground.keys():
-		var idx_i: int = idx
-		if WorldMap.underground_water[idx_i] <= 0.0:
-			continue
-		# Buried qanat channels barely evaporate at all -- that's the point.
-		var lost: float = WorldMap.underground_water[idx_i] * GameConfig.UNDERGROUND_SEEPAGE_COEFF
-		WorldMap.underground_water[idx_i] -= lost
+		var lost: float
+		if WorldMap.is_open_to_sky(idx_i):
+			lost = WorldMap.water[idx_i] * GameConfig.BASE_EVAPORATION_COEFF * _evaporation_multiplier(idx_i)
+		else:
+			# Covered channels barely lose anything -- that's the whole
+			# reason to pay the extra digging cost for them.
+			lost = WorldMap.water[idx_i] * GameConfig.COVERED_SEEPAGE_COEFF
+		lost = minf(lost, WorldMap.water[idx_i])
+		WorldMap.water[idx_i] -= lost
+		if WorldMap.is_open_to_sky(idx_i):
+			WorldMap.air_moisture[idx_i] = clampf(WorldMap.air_moisture[idx_i] + lost * GameConfig.MOISTURE_RELEASE_COEFF, 0.0, 1.0)
 
 func _evaporate_soil() -> void:
 	var moist: Dictionary = WaterSystem.get_moist_soil_tiles()

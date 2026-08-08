@@ -50,7 +50,7 @@ func can_plant(idx: int, id: StringName) -> bool:
 		return false
 	if idx < 0 or idx >= WorldMap.width * WorldMap.height:
 		return false
-	if WorldMap.terrain_type[idx] != WorldMap.Terrain.SAND:
+	if not WorldMap.is_plantable_ground(idx):
 		return false
 	if WorldMap.structure_type[idx] != WorldMap.Structure.NONE:
 		return false
@@ -143,7 +143,10 @@ func _on_day_passed(_day: int, season: int, _year: int) -> void:
 	for idx in plants.keys():
 		var p: PlantInstance = plants[idx]
 		var prev_stage: int = p.stage_index
-		p.advance_day()
+		# Fertile alluvium grows plants noticeably faster than dune sand,
+		# which is why real oases cluster along the wadis.
+		var fert: float = lerpf(GameConfig.FERTILITY_GROWTH_FLOOR, 1.0, clampf(WorldMap.fertility[idx], 0.0, 1.0))
+		p.advance_day(fert * clampf(p.health + 0.25, 0.3, 1.0))
 		if p.stage_index != prev_stage:
 			EventBus.emit_signal("plant_stage_changed", idx, p.stage_index)
 		if p.can_harvest_in_season(season):
