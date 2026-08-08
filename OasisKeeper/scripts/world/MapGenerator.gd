@@ -11,10 +11,11 @@ extends RefCounted
 ##   2. A valley floor between them: a shallow cross-valley basin plus a
 ##      gentle slope down the valley's long axis, so the whole map drains
 ##      toward one outlet and canals have a consistent downhill direction.
-##   3. A wadi network -- seasonal drainage channels traced by steepest
-##      descent from the foothills to the valley floor, then carved.
-##   4. Alluvium: fertile silt deposited either side of each wadi, the
-##      classic place a real oasis gets planted.
+##   3. Oasis sinks are chosen on the valley floor, and the wadi network is
+##      grown BACKWARDS from each of them -- uphill into the foothills,
+##      branching as it climbs -- then carved. See _carve_wadis.
+##   4. Alluvium: fertile silt either side of each wadi and spread flat over
+##      the oasis plain itself, the classic place a real oasis gets planted.
 ##   5. Dune fields in the dry ground far from any wadi.
 ##   6. Aquifers: organic, flood-filled water bodies inside the rock, each
 ##      with a finite volume and slow recharge.
@@ -24,6 +25,10 @@ const TERRAIN_DESERT_PAVEMENT: int = 1
 const TERRAIN_ALLUVIUM: int = 2
 const TERRAIN_SCREE: int = 3
 const TERRAIN_ROCK: int = 4
+
+## Base headings for the main branches leaving an oasis: toward the western
+## range, the eastern range, and up-valley.
+const ROOT_HEADINGS: Array[float] = [PI, 0.0, -PI * 0.5, PI * 0.5]
 
 ## Growth-rate multiplier plants get from each terrain type.
 const TERRAIN_FERTILITY := {
@@ -179,8 +184,9 @@ static func generate(width: int, height: int, rng_seed: int) -> Dictionary:
 		full_left_centers[y] = lerpf(left_centers[y0], left_centers[y1], fy) * scale_factor
 		full_right_centers[y] = lerpf(right_centers[y0], right_centers[y1], fy) * scale_factor
 
-	# --- Pass 3: wadi network ---------------------------------------------
-	_carve_wadis(width, height, rng, elevation, mountain_mask, wadi_strength, full_left_centers, full_right_centers)
+	# --- Pass 3: wadi network, grown backwards from the oasis sinks -------
+	var oases: PackedInt32Array = _carve_wadis(width, height, rng, elevation, mountain_mask,
+		wadi_strength, full_left_centers, full_right_centers)
 
 	# --- Pass 4 & 5: dunes, then terrain classification -------------------
 	for y in range(height):
@@ -265,6 +271,7 @@ static func generate(width: int, height: int, rng_seed: int) -> Dictionary:
 		"aquifer_volume": aquifer_result["volume"],
 		"aquifer_max_volume": aquifer_result["max_volume"],
 		"aquifer_recharge": aquifer_result["recharge"],
+		"oases": oases,
 	}
 
 static func _make_noise(s: int, type: int, freq: float, octaves: int) -> FastNoiseLite:
@@ -279,107 +286,290 @@ static func _make_noise(s: int, type: int, freq: float, octaves: int) -> FastNoi
 ## valley, then carves each into the heightmap. Because the paths follow the
 ## terrain they were generated from, the resulting network branches and
 ## meanders the way real drainage does.
-## Carves the drainage network.
+## Grows the wadi network BACKWARDS: from each oasis, uphill into the hills.
 ##
-## Built as a trunk channel plus tributaries rather than by tracing steepest
-## descent from each source. Pure descent tracing was tried and does not
-## survive this terrain: the valley floor only falls VALLEY_LONG_SLOPE over
-## the whole map, so once a channel leaves the foothills the regional
-## gradient per tile is smaller than the surface roughness, and the walk
-## stalls in the first shallow pit it meets. The result was stub channels a
-## few tiles long and a valley with almost no alluvium.
+## Water finds the path of least resistance downhill, carries gravel with it,
+## and over millennia cuts a branching valley; an oasis forms at the end of a
+## wadi, where the water spreads out and sinks away. Simulating that forwards
+## is the obvious approach and the wrong one -- channels traced downhill from
+## the hills wander off and miss the oasis, and on a valley floor this flat
+## they stall in the first shallow pit.
 ##
-## A trunk-and-tributary network is also simply what an arid valley looks
-## like: one main wash down the axis, with side channels coming off the
-## ranges to join it, building alluvial fans where they meet the floor.
+## Growing in reverse fixes both. Starting at the sink and climbing means the
+## catchment always converges on the point that matters, and "uphill" is
+## unambiguous even where the downhill gradient is smaller than the terrain's
+## own roughness. Each step takes the steepest ascent most of the time and a
+## random higher neighbour otherwise, and branches occasionally into a
+## thinner tributary -- which is what produces the dendritic shape.
 static func _carve_wadis(width: int, height: int, rng: RandomNumberGenerator,
 		elevation: PackedFloat32Array, mountain_mask: PackedFloat32Array,
 		wadi_strength: PackedFloat32Array, left_centers: PackedFloat32Array,
-		right_centers: PackedFloat32Array) -> void:
-	# --- trunk wash down the valley axis ----------------------------------
-	var trunk_meander := _make_noise(rng.randi(), FastNoiseLite.TYPE_PERLIN, 0.012, 3)
-	var trunk_x := PackedInt32Array()
-	trunk_x.resize(height)
-	for y in range(height):
-		var centre: float = (left_centers[y] + right_centers[y]) * 0.5
-		var valley_half: float = maxf(4.0, (right_centers[y] - left_centers[y]) * 0.5)
-		# Wander across the floor, but never far enough to climb the ranges.
-		var wander: float = trunk_meander.get_noise_1d(float(y)) * valley_half * 0.45
-		trunk_x[y] = clampi(int(centre + wander), 1, width - 2)
+		right_centers: PackedFloat32Array) -> PackedInt32Array:
+	var oases: PackedInt32Array = _pick_oasis_sites(width, height, rng, elevation, mountain_mask, left_centers, right_centers)
 
-	for y in range(height):
-		# The wash gathers flow as it runs south, so it widens and deepens.
-		var maturity: float = float(y) / float(maxi(1, height - 1))
-		var w: float = GameConfig.WADI_WIDTH * (0.9 + maturity * 1.4)
-		var d: float = GameConfig.WADI_DEPTH * (0.7 + maturity * 1.1)
-		_carve_at(width, height, trunk_x[y], y, w, d, elevation, wadi_strength)
+	# The climb is decided on a SMOOTHED copy of the heightmap. Greedy uphill
+	# on the raw field is hopeless here: the per-tile detail noise is larger
+	# than the regional gradient, so a branch summits a one-tile bump within a
+	# handful of steps and dead-ends. Smoothing exposes the broad shape of the
+	# land, which is the shape a catchment actually follows. Carving still
+	# writes into the real elevation array.
+	var climb_field: PackedFloat32Array = _smooth_field(elevation, width, height, 3)
 
-	# --- tributaries off both ranges --------------------------------------
-	var reference_area: float = 180.0 * 120.0
-	var area_scale: float = sqrt(float(width * height) / reference_area)
-	var tributary_count: int = maxi(GameConfig.WADI_COUNT, int(round(float(GameConfig.WADI_COUNT) * area_scale)))
+	for oasis_idx in oases:
+		# Nodes of this network, with the branch thickness at each node.
+		var node_idx := PackedInt32Array()
+		var node_thickness := PackedFloat32Array()
+		var visited := {}
+		visited[oasis_idx] = true
 
-	for i in range(tributary_count):
-		var y: int = rng.randi_range(int(height * 0.04), int(height * 0.96))
-		var from_left: bool = (i % 2) == 0
-		var x: int
-		if from_left:
-			x = int(left_centers[y] + GameConfig.FOOTHILL_WIDTH * 0.5)
+		# Shared, mutable node budget for this whole network.
+		var budget := [GameConfig.WADI_NODE_BUDGET_PER_OASIS]
+		for root in range(GameConfig.WADI_ROOTS_PER_OASIS):
+			# Send the roots at explicitly opposed headings -- west, east,
+			# up-valley. An even fan is not enough: whichever range is
+			# marginally closer wins the elevation term for every root, and
+			# the whole catchment ends up on one side of the valley.
+			var base: float = ROOT_HEADINGS[root % ROOT_HEADINGS.size()]
+			var angle: float = base + rng.randf_range(-0.35, 0.35)
+			_grow_branch(width, height, oasis_idx, float(GameConfig.WADI_START_THICKNESS), 0,
+				Vector2(cos(angle), sin(angle)), rng, elevation, climb_field,
+				visited, node_idx, node_thickness, budget)
+
+		_carve_network(width, height, oasis_idx, node_idx, node_thickness, elevation, wadi_strength)
+		_lay_down_oasis_plain(width, height, oasis_idx, elevation, wadi_strength)
+
+	_smooth_wadi_shoulders(width, height, elevation, wadi_strength)
+	return oases
+
+## One branch, climbing away from the sink until it runs out of rising
+## ground, gets too high, or hits the step limit. Recurses to spawn thinner
+## tributaries.
+##
+## Each candidate step is scored on how much it climbs plus how well it keeps
+## heading outward. The direction term matters: on the flat valley floor the
+## climb term is nearly zero and, without it, the walk mills around near the
+## oasis instead of reaching the hills. A small budget of non-climbing steps
+## lets a branch cross a flat or a saddle rather than stopping at the first
+## one -- the terrain is not monotonic and a real channel head is not either.
+static func _grow_branch(width: int, height: int, start_idx: int, thickness: float, depth: int,
+		direction: Vector2, rng: RandomNumberGenerator,
+		elevation: PackedFloat32Array, climb_field: PackedFloat32Array, visited: Dictionary,
+		node_idx: PackedInt32Array, node_thickness: PackedFloat32Array, budget: Array) -> void:
+	var current: int = start_idx
+	var heading: Vector2 = direction.normalized()
+	var stall_budget: int = 25
+	var candidates := PackedInt32Array()
+	var scores := PackedFloat32Array()
+
+	# Headwaters are short; the trunk is long. Scale branch length by how
+	# thick this branch is.
+	var max_steps: int = maxi(12, int(float(GameConfig.WADI_MAX_STEPS) * thickness / float(GameConfig.WADI_START_THICKNESS)))
+	for step in range(max_steps):
+		if budget[0] <= 0:
+			return
+		budget[0] -= 1
+		node_idx.append(current)
+		node_thickness.append(thickness)
+
+		var cx: int = current % width
+		var cy: int = current / width
+		var here: float = climb_field[current]
+
+		candidates.clear()
+		scores.clear()
+		var best_gain: float = -INF
+		for dy in range(-1, 2):
+			var ny: int = cy + dy
+			if ny < 1 or ny >= height - 1:
+				continue
+			for dx in range(-1, 2):
+				if dx == 0 and dy == 0:
+					continue
+				var nx: int = cx + dx
+				if nx < 1 or nx >= width - 1:
+					continue
+				var nidx: int = ny * width + nx
+				if visited.has(nidx):
+					continue
+				var gain: float = climb_field[nidx] - here
+				var stepv := Vector2(float(dx), float(dy)).normalized()
+				# The two terms are deliberately close in magnitude. Let the
+				# climb dominate and every branch bends toward whichever
+				# range is nearest; let the heading dominate and the channels
+				# ignore the terrain. This balance keeps them climbing while
+				# still honouring the direction they set out in.
+				var score: float = gain * 6.0 + heading.dot(stepv) * 1.4
+				candidates.append(nidx)
+				scores.append(score)
+				best_gain = maxf(best_gain, gain)
+
+		if candidates.is_empty():
+			return # boxed in by ground already carved
+
+		var next_idx: int
+		if rng.randf() < GameConfig.WADI_CLIMB_BIAS:
+			next_idx = candidates[0]
+			var best: float = scores[0]
+			for i in range(1, candidates.size()):
+				if scores[i] > best:
+					best = scores[i]
+					next_idx = candidates[i]
 		else:
-			x = int(right_centers[y] - GameConfig.FOOTHILL_WIDTH * 0.5)
-		x = clampi(x, 1, width - 2)
-		_carve_tributary(width, height, x, y, trunk_x, rng, elevation, wadi_strength)
+			next_idx = candidates[rng.randi_range(0, candidates.size() - 1)]
 
-## Walks a side channel from the foothills to the trunk. Horizontal progress
-## is forced one tile at a time so the channel always arrives, while the
-## vertical position is driven by a per-channel meander noise blended with a
-## downhill bias. Without the meander term the drift is decided purely by
-## local height, and on the near-flat valley floor that evaluates to zero
-## every step, producing perfectly straight east-west lines.
-static func _carve_tributary(width: int, height: int, start_x: int, start_y: int,
-		trunk_x: PackedInt32Array, rng: RandomNumberGenerator,
+		if best_gain <= 0.0:
+			stall_budget -= 1
+			if stall_budget <= 0:
+				return # genuinely nothing left to climb
+		else:
+			stall_budget = mini(stall_budget + 1, 25)
+
+		# Ease the heading toward the direction actually taken, so channels
+		# curve instead of turning in hard corners.
+		var moved := Vector2(float(next_idx % width - cx), float(next_idx / width - cy)).normalized()
+		heading = (heading * 0.88 + moved * 0.12).normalized()
+
+		visited[next_idx] = true
+		current = next_idx
+
+		if elevation[current] > GameConfig.WADI_MAX_CLIMB_ELEVATION:
+			return # up in the high rock; the channel head ends here
+
+		# Occasional split into a thinner tributary, sent off at an angle.
+		if thickness > 1.0 and depth < GameConfig.WADI_MAX_BRANCH_DEPTH \
+				and rng.randf() < GameConfig.WADI_BRANCH_CHANCE:
+			var spread: float = rng.randf_range(0.6, 1.2) * (1.0 if rng.randf() < 0.5 else -1.0)
+			_grow_branch(width, height, current, thickness - 1.0, depth + 1,
+				heading.rotated(spread), rng, elevation, climb_field,
+				visited, node_idx, node_thickness, budget)
+
+## Box-blurs a field. Used to give the climb the broad shape of the land
+## rather than its per-tile roughness.
+static func _smooth_field(src: PackedFloat32Array, width: int, height: int, radius: int) -> PackedFloat32Array:
+	var out := PackedFloat32Array()
+	out.resize(src.size())
+	for y in range(height):
+		for x in range(width):
+			var total: float = 0.0
+			var count: int = 0
+			for dy in range(-radius, radius + 1):
+				var ny: int = y + dy
+				if ny < 0 or ny >= height:
+					continue
+				var row: int = ny * width
+				for dx in range(-radius, radius + 1):
+					var nx: int = x + dx
+					if nx < 0 or nx >= width:
+						continue
+					total += src[row + nx]
+					count += 1
+			out[y * width + x] = total / float(count)
+	return out
+
+## Cuts the recorded network into the heightmap. A channel is widest and
+## deepest at the oasis end, where the most water has gathered, and narrows
+## to a scratch up in the hills -- so both branch thickness and distance from
+## the sink feed into the profile.
+static func _carve_network(width: int, height: int, oasis_idx: int,
+		node_idx: PackedInt32Array, node_thickness: PackedFloat32Array,
 		elevation: PackedFloat32Array, wadi_strength: PackedFloat32Array) -> void:
-	var wander := _make_noise(rng.randi(), FastNoiseLite.TYPE_PERLIN, 0.055, 2)
-	var x: int = start_x
-	var fy: float = float(start_y)
-	var y: int = start_y
-	var target: int = trunk_x[clampi(y, 0, height - 1)]
-	var step: int = 1 if target > x else -1
-	var total: int = maxi(1, absi(target - x))
-	var travelled: int = 0
+	if node_idx.is_empty():
+		return
+	var ox: int = oasis_idx % width
+	var oy: int = oasis_idx / width
 
-	while x != target and travelled < total:
-		# Downhill preference, sampled one column ahead.
-		var down: float = 0.0
-		var ahead: int = clampi(x + step, 1, width - 2)
-		var best: float = INF
-		for dy in [-1, 0, 1]:
-			var ny: int = clampi(y + dy, 1, height - 2)
-			var h: float = elevation[ny * width + ahead]
-			if h < best:
-				best = h
-				down = float(dy)
+	# Normalise distance against the furthest node this network reached.
+	var max_dist: float = 1.0
+	for i in range(node_idx.size()):
+		var px: int = node_idx[i] % width
+		var py: int = node_idx[i] / width
+		max_dist = maxf(max_dist, sqrt(float((px - ox) * (px - ox) + (py - oy) * (py - oy))))
 
-		# fy is kept as a float and NOT snapped back to y each step: rounding
-		# it into the integer grid every iteration would discard the
-		# fractional drift, the per-step movement would cap at +/-1, and the
-		# meander would average out into a straight line.
-		var meander: float = wander.get_noise_1d(float(travelled))
-		fy += clampf(meander * 1.6 + down * 0.5, -1.6, 1.6)
-		fy = clampf(fy, 1.0, float(height - 2))
-		y = clampi(int(round(fy)), 1, height - 2)
-		x += step
-		travelled += 1
-		target = trunk_x[clampi(y, 0, height - 1)]
+	var max_thickness: float = float(GameConfig.WADI_START_THICKNESS)
+	for i in range(node_idx.size()):
+		var idx: int = node_idx[i]
+		var px: int = idx % width
+		var py: int = idx / width
+		var dist: float = sqrt(float((px - ox) * (px - ox) + (py - oy) * (py - oy)))
+		var near_oasis: float = clampf(1.0 - dist / max_dist, 0.0, 1.0)
+		var order: float = clampf(node_thickness[i] / max_thickness, 0.0, 1.0)
 
-		var maturity: float = float(travelled) / float(total)
-		var w: float = GameConfig.WADI_WIDTH * (0.35 + maturity * 0.65)
-		var d: float = GameConfig.WADI_DEPTH * (0.3 + maturity * 0.7)
-		_carve_at(width, height, x, y, w, d, elevation, wadi_strength)
+		# Blend the two so a thick trunk far from the sink is still a real
+		# channel, and a thin twig near it is still modest.
+		var scale: float = 0.30 + 0.70 * (near_oasis * 0.6 + order * 0.4)
+		_carve_at(width, height, px, py,
+			GameConfig.WADI_WIDTH * scale, GameConfig.WADI_DEPTH * scale,
+			elevation, wadi_strength)
 
-## Cuts a single channel cross-section, with a silt apron either side.
+## The sink itself: a flat alluvial plain. Sediment washed down the wadi
+## settles here, so the ground is level, slightly proud of the channel floor,
+## and the most fertile land on the map.
+static func _lay_down_oasis_plain(width: int, height: int, oasis_idx: int,
+		elevation: PackedFloat32Array, wadi_strength: PackedFloat32Array) -> void:
+	var ox: int = oasis_idx % width
+	var oy: int = oasis_idx / width
+	var r: int = int(ceil(GameConfig.OASIS_BASIN_RADIUS))
+
+	# Level to the local floor, plus a little, so the plain reads as filled
+	# with silt rather than as another hole.
+	var floor_h: float = elevation[oasis_idx]
+	for dy in range(-r, r + 1):
+		var ny: int = oy + dy
+		if ny < 0 or ny >= height:
+			continue
+		for dx in range(-r, r + 1):
+			var nx: int = ox + dx
+			if nx < 0 or nx >= width:
+				continue
+			if sqrt(float(dx * dx + dy * dy)) > GameConfig.OASIS_BASIN_RADIUS:
+				continue
+			floor_h = minf(floor_h, elevation[ny * width + nx])
+	var plain_h: float = floor_h + 0.35
+
+	for dy in range(-r, r + 1):
+		var ny: int = oy + dy
+		if ny < 0 or ny >= height:
+			continue
+		for dx in range(-r, r + 1):
+			var nx: int = ox + dx
+			if nx < 0 or nx >= width:
+				continue
+			var dist: float = sqrt(float(dx * dx + dy * dy))
+			if dist > GameConfig.OASIS_BASIN_RADIUS:
+				continue
+			var nidx: int = ny * width + nx
+			var t: float = clampf(1.0 - dist / GameConfig.OASIS_BASIN_RADIUS, 0.0, 1.0)
+			elevation[nidx] = lerpf(elevation[nidx], plain_h, t)
+			wadi_strength[nidx] = maxf(wadi_strength[nidx], 0.55 + t * 0.45)
+
+## Wadis do not have knife-sharp edges. Blurs elevation only where the
+## network actually cut, so the rest of the terrain keeps its definition.
+static func _smooth_wadi_shoulders(width: int, height: int,
+		elevation: PackedFloat32Array, wadi_strength: PackedFloat32Array) -> void:
+	for pass_i in range(GameConfig.WADI_SMOOTH_PASSES):
+		var src: PackedFloat32Array = elevation.duplicate()
+		for y in range(1, height - 1):
+			for x in range(1, width - 1):
+				var idx: int = y * width + x
+				var w: float = wadi_strength[idx]
+				if w <= 0.01:
+					continue
+				var total: float = 0.0
+				for dy in range(-1, 2):
+					var row: int = (y + dy) * width
+					for dx in range(-1, 2):
+						total += src[row + x + dx]
+				# Blend toward the local average, strongest in the channel.
+				elevation[idx] = lerpf(src[idx], total / 9.0, clampf(w, 0.0, 1.0) * 0.6)
+
+## Cuts a single channel cross-section into the heightmap, with a silt apron
+## either side. A wadi is a flat-floored notch with soft shoulders, so the
+## profile falls off with distance and the alluvium grades outward past the
+## channel edge rather than stopping at it.
 static func _carve_at(width: int, height: int, px: int, py: int, w: float, d: float,
 		elevation: PackedFloat32Array, wadi_strength: PackedFloat32Array) -> void:
+	if w <= 0.0:
+		return
 	var r: int = int(ceil(w + GameConfig.ALLUVIUM_WIDTH))
 	for dy in range(-r, r + 1):
 		var ny: int = py + dy
@@ -398,6 +588,46 @@ static func _carve_at(width: int, height: int, px: int, py: int, w: float, d: fl
 			elif dist <= w + GameConfig.ALLUVIUM_WIDTH:
 				var t: float = 1.0 - (dist - w) / GameConfig.ALLUVIUM_WIDTH
 				wadi_strength[nidx] = maxf(wadi_strength[nidx], t * 0.6)
+
+## Picks the sinks. An oasis wants low, flat ground out on the valley floor,
+## clear of the ranges and reasonably far from its neighbours.
+static func _pick_oasis_sites(width: int, height: int, rng: RandomNumberGenerator,
+		elevation: PackedFloat32Array, mountain_mask: PackedFloat32Array,
+		left_centers: PackedFloat32Array, right_centers: PackedFloat32Array) -> PackedInt32Array:
+	var chosen := PackedInt32Array()
+	var bands: int = GameConfig.OASIS_COUNT
+
+	for band in range(bands):
+		# Spread the sites down the length of the valley, then search a
+		# window around that band for the lowest valley-floor tile.
+		var band_centre: float = float(height) * (float(band) + 0.5) / float(bands)
+		var best_idx: int = -1
+		var best_h: float = INF
+		for attempt in range(400):
+			var y: int = clampi(int(band_centre + rng.randf_range(-1.0, 1.0) * float(height) / float(bands) * 0.4), 2, height - 3)
+			var lo: float = left_centers[y] + GameConfig.FOOTHILL_WIDTH
+			var hi: float = right_centers[y] - GameConfig.FOOTHILL_WIDTH
+			if hi - lo < 8.0:
+				continue
+			var x: int = clampi(int(rng.randf_range(lo, hi)), 2, width - 3)
+			var idx: int = y * width + x
+			if mountain_mask[idx] > 0.12:
+				continue
+			var too_close: bool = false
+			for other in chosen:
+				var dx: int = (other % width) - x
+				var dy: int = (other / width) - y
+				if dx * dx + dy * dy < GameConfig.OASIS_MIN_SEPARATION * GameConfig.OASIS_MIN_SEPARATION:
+					too_close = true
+					break
+			if too_close:
+				continue
+			if elevation[idx] < best_h:
+				best_h = elevation[idx]
+				best_idx = idx
+		if best_idx >= 0:
+			chosen.append(best_idx)
+	return chosen
 
 
 static func _generate_aquifers(width: int, height: int, rng: RandomNumberGenerator,

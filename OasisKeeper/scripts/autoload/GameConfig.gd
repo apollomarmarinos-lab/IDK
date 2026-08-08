@@ -43,10 +43,40 @@ const VALLEY_BASIN_DEPTH: float = 2.5 ## cross-valley basin so water gathers mid
 const VALLEY_LONG_SLOPE: float = 7.0 ## total elevation drop from north end to south outlet
 const ROCK_SLOPE_THRESHOLD: float = 0.62 ## mountain-mask value above which terrain is bare rock
 
-const WADI_COUNT: int = 7 ## seasonal drainage channels carved from the ranges
-const WADI_DEPTH: float = 1.8
-const WADI_WIDTH: float = 2.6
-const ALLUVIUM_WIDTH: float = 5.0 ## fertile silt apron either side of a wadi
+const WADI_DEPTH: float = 1.8 ## depth of the trunk channel at the oasis
+const WADI_WIDTH: float = 2.6 ## half-width of the trunk channel at the oasis
+## Silt apron either side of a wadi. Applied around every node of the
+## network, so it drives how much of the valley ends up fertile -- small
+## changes here move the alluvium share a long way.
+const ALLUVIUM_WIDTH: float = 2.2
+
+# --- Wadi network: grown backwards, uphill, from each oasis ---------------
+# Water takes the path of least resistance downhill and cuts a branching
+# valley over millennia; an oasis forms at the end of a wadi where the water
+# sinks away. Rather than simulate that forwards (which misses the oasis),
+# the network is grown in reverse: start at the oasis and climb into the
+# hills, so the catchment always converges on the point that matters.
+const OASIS_COUNT: int = 3
+const OASIS_MIN_SEPARATION: int = 45 ## tiles between oasis sites
+const OASIS_BASIN_RADIUS: float = 7.0 ## flat alluvial plain around the sink
+const WADI_ROOTS_PER_OASIS: int = 3 ## main branches leaving each oasis
+const WADI_START_THICKNESS: int = 5 ## thins by 1 at every branch
+const WADI_MAX_STEPS: int = 110 ## safety limit for a single branch
+## Total tiles the whole network from one oasis may occupy. This, not the
+## branch probability, is what actually controls how much of the valley ends
+## up as fertile alluvium: a 10%-per-step split chance over a long branch
+## spawns tributaries exponentially, and tuning it is guesswork. A hard
+## budget makes coverage predictable whatever the branching does.
+const WADI_NODE_BUDGET_PER_OASIS: int = 560
+const WADI_BRANCH_CHANCE: float = 0.10 ## per step
+const WADI_MAX_BRANCH_DEPTH: int = 3
+## 70% steepest ascent, 30% random among the higher neighbours -- enough
+## randomness to look natural without wandering aimlessly.
+const WADI_CLIMB_BIAS: float = 0.7
+## Branches stop climbing once they reach this height, so channels cut the
+## foothills and lower slopes but do not run over the peaks.
+const WADI_MAX_CLIMB_ELEVATION: float = 30.0
+const WADI_SMOOTH_PASSES: int = 2 ## wadis have soft shoulders, not knife edges
 const DUNE_FREQUENCY: float = 0.055
 const DUNE_HEIGHT: float = 1.6
 

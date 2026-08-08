@@ -39,8 +39,11 @@ func _frame_subject() -> void:
 			var c: Vector2i = WorldMap.coords_of(i)
 			cam.position = Vector2(float(c.x) + 6.0, float(c.y) + 2.0) * float(GameConfig.TILE_PIXEL_SIZE)
 			return
-	# No canal to look at: frame the whole map, which is what an overview
-	# shot of the terrain wants.
+	# No canal to look at: either frame an oasis sink, or the whole map.
+	if args.has("--screenshot-oasis") and not WorldMap.oases.is_empty():
+		var o: Vector2i = WorldMap.coords_of(WorldMap.oases[0])
+		cam.position = Vector2(float(o.x), float(o.y)) * float(GameConfig.TILE_PIXEL_SIZE)
+		return
 	cam.position = Vector2(float(WorldMap.width), float(WorldMap.height)) * 0.5 * float(GameConfig.TILE_PIXEL_SIZE)
 
 ## Forces the clock to a given hour and freezes it. Done SETTLE_FRAMES

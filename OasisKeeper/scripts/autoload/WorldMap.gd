@@ -19,6 +19,10 @@ var elevation: PackedFloat32Array = PackedFloat32Array()
 var fertility: PackedFloat32Array = PackedFloat32Array()
 var wadi_strength: PackedFloat32Array = PackedFloat32Array()
 var rare_groundwater: PackedFloat32Array = PackedFloat32Array()
+## Tile indices of the natural oasis sinks. The wadi network was grown
+## outward from these, so they are the low, fertile, well-watered ground the
+## player will most likely want to settle.
+var oases: PackedInt32Array = PackedInt32Array()
 
 # Aquifer bodies inside the rock. aquifer_id indexes into the per-body arrays.
 var aquifer_id: PackedInt32Array = PackedInt32Array()
@@ -58,6 +62,7 @@ func generate(rng_seed: int = -1) -> void:
 	fertility = layers["fertility"]
 	wadi_strength = layers["wadi_strength"]
 	rare_groundwater = layers["rare_groundwater"]
+	oases = layers["oases"]
 	aquifer_id = layers["aquifer_id"]
 	aquifer_volume = layers["aquifer_volume"]
 	aquifer_max_volume = layers["aquifer_max_volume"]

@@ -158,18 +158,71 @@ read as a place rather than layered noise:
 1. Two meandering ranges (ridged multifractal) with a scree apron.
 2. A valley floor between them: a shallow cross-valley basin plus a slope
    down the valley's long axis, so the whole map drains toward one outlet.
-3. A **wadi network** traced by steepest descent from the foothills out
-   into the valley, then carved -- so the channels branch and meander the
-   way real drainage does.
-4. **Alluvium** deposited either side of each wadi. This is the fertile
-   ground, and plants grow markedly faster on it than on dune sand -- which
-   is exactly why real oases sit along the wadis.
+3. **Oasis sinks** chosen on the valley floor, and a **wadi network grown
+   backwards from each of them** — see below.
+4. **Alluvium**: fertile silt either side of every channel, and spread flat
+   across the oasis plain itself. Plants grow markedly faster on it than on
+   dune sand, which is exactly why real oases sit where they do.
 5. **Dune fields** on the dry ground far from wadis and ranges.
 6. **Aquifers** flood-filled inside the rock.
 
-Terrain types are Dune Sand, Desert Pavement, Alluvium, Scree and Rock,
-each with its own fertility. A typical map comes out around 43% dune sand,
-16% pavement, 8% alluvium, 13% scree, 20% rock, with 7-9 aquifer bodies.
+Terrain types are Dune Sand, Desert Pavement, Alluvium, Scree and Rock, each
+with its own fertility. A typical map comes out around 41% dune sand, 17%
+pavement, 8% alluvium, 13% scree, 20% rock, with 6–10 aquifer bodies and 3
+oases.
+
+### The wadi network is grown backwards, uphill
+
+Water takes the path of least resistance downhill, carries gravel with it,
+and over millennia cuts a branching valley; an oasis forms at the end of a
+wadi, where the water spreads out and sinks away.
+
+Simulating that forwards is the obvious approach and it does not work here.
+Channels traced downhill from the hills wander off and miss the oasis, and
+on a valley floor this flat they stall almost immediately — the floor falls
+only `VALLEY_LONG_SLOPE` over the entire map, so beyond the foothills the
+regional gradient per tile is *smaller than the terrain's own roughness*.
+An earlier version did exactly this and produced stub channels a few tiles
+long, leaving the valley with 0.6% alluvium.
+
+So the network is grown in reverse. Each oasis is a sink, and branches climb
+away from it into the hills:
+
+- Three roots leave each sink at **explicitly opposed headings** (west, east,
+  up-valley). An even fan is not enough — whichever range is marginally
+  closer wins the elevation term for every root, and the whole catchment
+  ends up on one side of the valley.
+- Each step scores its candidates on how much they climb plus how well they
+  keep the branch's heading. The two terms are deliberately close in
+  magnitude: let the climb dominate and every branch bends toward the
+  nearest range; let the heading dominate and the channels ignore the
+  terrain.
+- The climb is judged on a **smoothed** copy of the heightmap. Greedy uphill
+  on the raw field summits a one-tile bump within a few steps and dead-ends.
+- Branches split occasionally into thinner tributaries, which is what
+  produces the dendritic shape, and a small budget of non-climbing steps
+  lets a channel cross a flat or a saddle instead of stopping at the first
+  one.
+- A **node budget per network** caps total coverage. This, not the branch
+  probability, is what actually controls how much of the valley becomes
+  fertile: a 10%-per-step split chance over a long branch spawns tributaries
+  exponentially, and tuning it is guesswork.
+
+Carving then cuts the recorded network into the heightmap. A channel is
+widest and deepest at the oasis end, where the most water has gathered, and
+narrows to a scratch up in the hills, so both branch thickness and distance
+from the sink feed the profile. The oasis itself is levelled into a flat
+alluvial plain — sediment washed down the wadi settles there — sitting
+slightly proud of the channel floor so it reads as silted up rather than as
+another hole. Finally the channel shoulders are blurred, because wadis do
+not have knife-sharp edges.
+
+The camera opens on the first oasis, since that is the ground the whole
+network drains into and the obvious place to start building.
+
+Not implemented from this design: scattered boulders and gravel props along
+the channel bends. The game has no prop layer yet — everything on the map is
+either terrain, a structure or a plant.
 
 ## Architecture
 

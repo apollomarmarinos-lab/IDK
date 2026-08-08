@@ -9,10 +9,13 @@ extends Camera2D
 func _ready() -> void:
 	make_current()
 	var t: float = float(GameConfig.TILE_PIXEL_SIZE)
-	# Open looking at the foot of the western range rather than the middle
-	# of an empty dune field: the player should see mountains, foothills and
-	# valley floor in the first frame.
-	position = Vector2(42.0 * t, float(GameConfig.MAP_HEIGHT) * 0.5 * t)
+	# Open on a natural oasis sink -- the low, fertile ground the wadi
+	# network drains into, and the obvious place to start building.
+	if not WorldMap.oases.is_empty():
+		var c: Vector2i = WorldMap.coords_of(WorldMap.oases[0])
+		position = Vector2(float(c.x), float(c.y)) * t
+	else:
+		position = Vector2(float(GameConfig.MAP_WIDTH), float(GameConfig.MAP_HEIGHT)) * 0.5 * t
 	# 0.8 keeps tiles large and readable while still showing a range and a
 	# stretch of valley at once.
 	zoom = Vector2(0.8, 0.8)

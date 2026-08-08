@@ -136,6 +136,10 @@ func _report_world_stats() -> void:
 		parts.append("%s %.1f%%" % [names[t], float(counts.get(t, 0)) / float(WorldMap.width * WorldMap.height) * 100.0])
 	print("SELFTEST terrain: ", ", ".join(parts))
 	print("SELFTEST aquifer bodies: %d covering %d rock tiles" % [WorldMap.aquifer_volume.size(), aquifer_tiles])
+	var oasis_list: Array[String] = []
+	for o in WorldMap.oases:
+		oasis_list.append(str(WorldMap.coords_of(o)))
+	print("SELFTEST oases: %d at %s" % [WorldMap.oases.size(), ", ".join(oasis_list)])
 
 func _process(_delta: float) -> void:
 	_frame += 1
