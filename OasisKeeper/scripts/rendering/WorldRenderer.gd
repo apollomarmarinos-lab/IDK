@@ -611,17 +611,46 @@ func _draw_selection() -> void:
 		# difference between "my canal is broken" and "grade those two tiles".
 		if i > 0 and WorldMap.height_level(idx) > WorldMap.height_level(drag_path[i - 1]):
 			_draw_step_up_marker(layer, px, py)
+
+## Draws dark green markers at reservoir/cistern inlet positions during placement preview.
+func _draw_reservoir_inlet_preview(layer: Node2D, origin: Vector2i, fp: Vector2i, ok_all: bool) -> void:
+	var mid_x: int = fp.x / 2
+	var mid_y: int = fp.y / 2
+	var inlet_color := Color(0.0, 0.55, 0.0, 0.9) # Dark green for connection points
+	
+	# Draw inlet markers at middle of each side
+	var inlet_positions: Array[Vector2i] = [
+		Vector2i(mid_x, 0),           # Top edge
+		Vector2i(mid_x, fp.y - 1),    # Bottom edge
+		Vector2i(0, mid_y),           # Left edge
+		Vector2i(fp.x - 1, mid_y),    # Right edge
+	]
+	
+	for pos in inlet_positions:
+		var tile_x: int = origin.x + pos.x
+		var tile_y: int = origin.y + pos.y
+		var inset: float = T * 0.15
+		var rect := Rect2(float(tile_x) * T + inset, float(tile_y) * T + inset, T - inset * 2.0, T - inset * 2.0)
+		layer.draw_rect(rect, inlet_color, false, maxf(2.0, T * 0.08))
 	# Multi-tile buildings preview their whole footprint, not just the cursor
 	# tile, so it is clear how much room they need before committing.
+	# The glowing square appears in the MIDDLE of the footprint for better visual feedback.
 	if hovered_tile >= 0 and ghost_structure >= 0:
 		var fp: Vector2i = BuildSystem.footprint_of(ghost_structure)
 		if fp != Vector2i.ONE:
 			var hc: Vector2i = WorldMap.coords_of(hovered_tile)
 			var ok_all: bool = BuildSystem.can_place(hovered_tile, ghost_structure)
 			var tint: Color = Color(0.35, 0.95, 0.45, 0.25) if ok_all else Color(0.95, 0.3, 0.25, 0.25)
-			layer.draw_rect(Rect2(float(hc.x) * T, float(hc.y) * T, float(fp.x) * T, float(fp.y) * T), tint)
-			layer.draw_rect(Rect2(float(hc.x) * T, float(hc.y) * T, float(fp.x) * T, float(fp.y) * T),
+			# Calculate center offset to show the footprint centered on cursor
+			var center_offset_x: int = fp.x / 2
+			var center_offset_y: int = fp.y / 2
+			var centered_hc: Vector2i = Vector2i(hc.x - center_offset_x, hc.y - center_offset_y)
+			layer.draw_rect(Rect2(float(centered_hc.x) * T, float(centered_hc.y) * T, float(fp.x) * T, float(fp.y) * T), tint)
+			layer.draw_rect(Rect2(float(centered_hc.x) * T, float(centered_hc.y) * T, float(fp.x) * T, float(fp.y) * T),
 				Color(tint.r, tint.g, tint.b, 0.95), false, maxf(1.5, T * 0.06))
+			# Mark reservoir/cistern connection points (inlets) in dark green while selected
+			if ghost_structure == WorldMap.Structure.RESERVOIR or ghost_structure == WorldMap.Structure.CISTERN:
+				_draw_reservoir_inlet_preview(layer, centered_hc, fp, ok_all)
 
 	if hovered_tile >= 0:
 		var x: int = hovered_tile % WorldMap.width

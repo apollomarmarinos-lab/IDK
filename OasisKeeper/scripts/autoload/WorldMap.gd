@@ -46,6 +46,10 @@ var soil_moisture: PackedFloat32Array = PackedFloat32Array()
 ## Smoothed net flow direction per tile, purely for on-screen arrows.
 var flow_x: PackedFloat32Array = PackedFloat32Array()
 var flow_y: PackedFloat32Array = PackedFloat32Array()
+## Target water level for reservoirs/cisterns (in height levels). Set by player
+## with +/- keys or scroll wheel. Reservoirs fill from connected source canals
+## up to this level, allowing controlled overflow for flooding.
+var reservoir_target_level: PackedInt32Array = PackedInt32Array()
 
 # Dynamic climate layers
 var air_moisture: PackedFloat32Array = PackedFloat32Array()
@@ -100,6 +104,9 @@ func generate(rng_seed: int = -1) -> void:
 	structure_owner.fill(-1)
 	is_inlet = PackedByteArray()
 	is_inlet.resize(size)
+
+	reservoir_target_level = PackedInt32Array()
+	reservoir_target_level.resize(size)
 
 	EventBus.emit_signal("world_generated")
 
@@ -195,6 +202,13 @@ func is_open_to_sky(idx: int) -> bool:
 	var s: int = structure_type[idx]
 	return s == Structure.CANAL_OPEN or s == Structure.RESERVOIR or s == Structure.GATE or s == Structure.WELL
 
+## Reservoirs and cisterns are always open to connected canals at any level.
+## This allows water to flow into them from source canals regardless of height
+## difference, simulating how real reservoirs fill from their inlet level.
+func is_reservoir_or_cistern(idx: int) -> bool:
+	var s: int = structure_type[idx]
+	return s == Structure.RESERVOIR or s == Structure.CISTERN
+
 func reset_tile_structure(idx: int) -> void:
 	structure_type[idx] = Structure.NONE
 	gate_open[idx] = 0
@@ -203,6 +217,7 @@ func reset_tile_structure(idx: int) -> void:
 	water[idx] = 0.0
 	flow_x[idx] = 0.0
 	flow_y[idx] = 0.0
+	reservoir_target_level[idx] = 0
 
 ## Water-holding capacity of a tile, which depends on what is built there.
 func water_capacity(idx: int) -> float:

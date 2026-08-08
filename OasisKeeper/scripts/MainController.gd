@@ -18,6 +18,7 @@ var _painted_this_drag: Dictionary = {}
 var _drag_anchor: int = -1
 var _drag_path: PackedInt32Array = PackedInt32Array()
 ## Tools laid out as a line rather than painted tile by tile.
+## Canal tools use L-shaped drag placement: click-release to start, click again to commit.
 const LINE_TOOLS := [&"canal_open", &"canal_covered", &"raise_ground", &"lower_ground"]
 ## How far the cursor may travel and still count as a click rather than a drag.
 const CLICK_SLOP: float = 6.0
@@ -48,7 +49,17 @@ func _process(_delta: float) -> void:
 		tile_inspector.track_tile(idx)
 
 func _unhandled_input(event: InputEvent) -> void:
-	if event is InputEventMouseMotion:
+	if event is InputEventKey and event.pressed:
+		var key_event: InputEventKey = event
+		# Handle reservoir/cistern size cycling with R / scroll wheel
+		if key_event.keycode == KEY_R:
+			_on_cycle_basin_size()
+		# Handle height level adjustment for reservoirs/cisterns with +/- keys
+		elif key_event.keycode == KEY_EQUAL or key_event.keycode == KEY_PLUS:
+			_on_adjust_reservoir_level(1)
+		elif key_event.keycode == KEY_MINUS or key_event.keycode == KEY_UNDERSCORE:
+			_on_adjust_reservoir_level(-1)
+	elif event is InputEventMouseMotion:
 		if _dragging:
 			if _is_line_tool():
 				_update_drag_path()
@@ -82,6 +93,29 @@ func _unhandled_input(event: InputEvent) -> void:
 				_right_press_pos = mb.position
 			elif mb.position.distance_to(_right_press_pos) <= CLICK_SLOP:
 				build_menu.select_tool_externally(&"inspect")
+		elif mb.button_index == MOUSE_BUTTON_WHEEL_UP:
+			# Scroll up to increase reservoir target level
+			if _current_build_tool_is_basin():
+				_on_adjust_reservoir_level(1)
+		elif mb.button_index == MOUSE_BUTTON_WHEEL_DOWN:
+			# Scroll down to decrease reservoir target level
+			if _current_build_tool_is_basin():
+				_on_adjust_reservoir_level(-1)
+
+## Returns true if the currently selected tool places a basin (reservoir/cistern).
+func _current_build_tool_is_basin() -> bool:
+	return current_tool == &"reservoir" or current_tool == &"cistern"
+
+## Cycles through available basin sizes (3x3, 3x5, 5x3).
+func _on_cycle_basin_size() -> void:
+	if _current_build_tool_is_basin():
+		BuildSystem.cycle_basin_size()
+
+## Adjusts the target water level for reservoirs/cisterns.
+## This sets the desired fill level relative to the placement height.
+func _on_adjust_reservoir_level(delta: int) -> void:
+	if _current_build_tool_is_basin():
+		BuildSystem.adjust_reservoir_level(delta)
 
 func _tile_at_mouse() -> int:
 	var world_pos: Vector2 = get_global_mouse_position()
