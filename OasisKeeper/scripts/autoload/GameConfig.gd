@@ -28,7 +28,8 @@ const DAYS_PER_SEASON: int = 20
 const SEASONS_PER_YEAR: int = 4
 const SIM_TICK_INTERVAL: float = 0.25 ## seconds of real time between simulation ticks
 ## In-game minutes simulated per tick (independent of framerate).
-const GAME_MINUTES_PER_TICK: float = 10.0
+## Set so 12 in-game hours = 10 real minutes: 720 game min / (600 real sec / 0.25 sec per tick) = 0.3
+const GAME_MINUTES_PER_TICK: float = 0.3
 
 # ---------------------------------------------------------------------------
 # Terrain generation
