@@ -13,6 +13,7 @@ func _ready() -> void:
 	offset_right = 0.0
 	offset_bottom = 0.0
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
+	visible = true
 
 	var panel := PanelContainer.new()
 	panel.set_anchors_preset(Control.PRESET_FULL_RECT)
