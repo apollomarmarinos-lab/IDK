@@ -43,7 +43,7 @@ func _process(_delta: float) -> void:
 	if WorldMap.fertility[idx] > 0.0:
 		lines.append("Fertility: %.0f%%" % (WorldMap.fertility[idx] * 100.0))
 	lines.append("%.1f C   Shade %.0f%%   Humidity %.0f%%" % [
-		WorldMap.temperature[idx], WorldMap.shade[idx] * 100.0, WorldMap.air_moisture[idx] * 100.0])
+		ClimateSystem.temperature_at(idx), WorldMap.shade[idx] * 100.0, WorldMap.air_moisture[idx] * 100.0])
 
 	if WorldMap.has_aquifer(idx):
 		var body: int = WorldMap.aquifer_id[idx]

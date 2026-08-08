@@ -56,26 +56,52 @@ static func generate(width: int, height: int, rng_seed: int) -> Dictionary:
 	wadi_strength.resize(size)
 
 	# --- Pass 1 & 2: ranges, foothills, valley floor -----------------------
-	# Generate base terrain at lower resolution then interpolate for speed
+	#
+	# The ranges are NOT a distance-to-a-centreline ramp. That was the previous
+	# approach and it can only ever produce two straight bands: the shape comes
+	# from `1 - |x - centre| / width`, which is a linear wedge, and no amount of
+	# noise laid on top changes the silhouette. It is why the mountains looked
+	# like two painted stripes no matter how the noise was tuned.
+	#
+	# Instead:
+	#   * The sampling coordinates are DOMAIN WARPED before any noise is read.
+	#     Warping is what breaks straight edges -- it drags the whole field
+	#     sideways by a smoothly varying amount, so ridges bend, spurs reach
+	#     out into the valley and the range edge frays instead of running true.
+	#   * Height comes from ridged multifractal noise, which produces creased
+	#     crests rather than blobs.
+	#   * The band is only a soft WEIGHT on that noise, itself modulated so its
+	#     width breathes along the valley. Crucially the two are multiplied and
+	#     then thresholded, so wherever the ridge noise happens to be low the
+	#     massif simply is not there: that is what carves passes, embayments
+	#     and detached outlying hills for free.
 	var scale_factor := 2
 	var low_width := width / scale_factor
 	var low_height := height / scale_factor
 	var low_size := low_width * low_height
-	
+
 	var low_elevation := PackedFloat32Array()
 	var low_mountain_mask := PackedFloat32Array()
 	low_elevation.resize(low_size)
 	low_mountain_mask.resize(low_size)
-	
-	var ridge_noise := _make_noise(rng_seed, FastNoiseLite.TYPE_PERLIN, 0.018 * scale_factor, 4)
+
+	# Ridged multifractal: the actual mountain shape.
+	var ridge_noise := _make_noise(rng_seed, FastNoiseLite.TYPE_PERLIN, 0.020 * scale_factor, 5)
 	ridge_noise.fractal_type = FastNoiseLite.FRACTAL_RIDGED
+	ridge_noise.fractal_gain = 0.52
+	ridge_noise.fractal_lacunarity = 2.1
+	# Domain warp: two independent low-frequency fields displace the sample
+	# point. Large amplitude here is deliberate -- it is what stops the range
+	# reading as a stripe.
+	var warp_a := _make_noise(rng_seed + 501, FastNoiseLite.TYPE_PERLIN, 0.006 * scale_factor, 3)
+	var warp_b := _make_noise(rng_seed + 502, FastNoiseLite.TYPE_PERLIN, 0.006 * scale_factor, 3)
+	# Second, finer warp for edge detail.
+	var warp_c := _make_noise(rng_seed + 503, FastNoiseLite.TYPE_PERLIN, 0.030 * scale_factor, 2)
+	# Modulates how wide the massif is at each point along the valley.
+	var width_noise := _make_noise(rng_seed + 504, FastNoiseLite.TYPE_PERLIN, 0.012 * scale_factor, 2)
 	var detail_noise := _make_noise(rng_seed + 11, FastNoiseLite.TYPE_PERLIN, 0.09 * scale_factor, 2)
 	var meander_left := _make_noise(rng_seed + 101, FastNoiseLite.TYPE_PERLIN, 0.008 * scale_factor, 2)
 	var meander_right := _make_noise(rng_seed + 202, FastNoiseLite.TYPE_PERLIN, 0.008 * scale_factor, 2)
-	var peak_noise_left := _make_noise(rng_seed + 103, FastNoiseLite.TYPE_PERLIN, 0.025 * scale_factor, 3)
-	var peak_noise_right := _make_noise(rng_seed + 203, FastNoiseLite.TYPE_PERLIN, 0.025 * scale_factor, 3)
-	var slope_noise_left := _make_noise(rng_seed + 104, FastNoiseLite.TYPE_PERLIN, 0.015 * scale_factor, 2)
-	var slope_noise_right := _make_noise(rng_seed + 204, FastNoiseLite.TYPE_PERLIN, 0.015 * scale_factor, 2)
 	var dune_noise := _make_noise(rng_seed + 303, FastNoiseLite.TYPE_PERLIN, GameConfig.DUNE_FREQUENCY * scale_factor, 2)
 	var pavement_noise := _make_noise(rng_seed + 404, FastNoiseLite.TYPE_PERLIN, 0.03 * scale_factor, 2)
 
@@ -84,50 +110,58 @@ static func generate(width: int, height: int, rng_seed: int) -> Dictionary:
 	var right_centers := PackedFloat32Array()
 	left_centers.resize(low_height)
 	right_centers.resize(low_height)
-
 	for y in range(low_height):
 		left_centers[y] = band * 0.5 + meander_left.get_noise_1d(float(y)) * GameConfig.MOUNTAIN_MEANDER_AMPLITUDE / scale_factor
 		right_centers[y] = float(low_width) - band * 0.5 + meander_right.get_noise_1d(float(y)) * GameConfig.MOUNTAIN_MEANDER_AMPLITUDE / scale_factor
 
+	var warp_amp: float = GameConfig.MOUNTAIN_WARP_AMPLITUDE / float(scale_factor)
+	var thresh: float = GameConfig.MOUNTAIN_MASSIF_THRESHOLD
+
 	for y in range(low_height):
-		var left_center: float = left_centers[y]
-		var right_center: float = right_centers[y]
 		var long_slope: float = (1.0 - float(y) / float(low_height)) * GameConfig.VALLEY_LONG_SLOPE
-		var peak_left: float = (peak_noise_left.get_noise_1d(float(y)) + 1.0) * 0.5
-		var peak_right: float = (peak_noise_right.get_noise_1d(float(y)) + 1.0) * 0.5
-		var slope_exp_left: float = slope_noise_left.get_noise_1d(float(y)) * 0.3 + 1.0
-		var slope_exp_right: float = slope_noise_right.get_noise_1d(float(y)) * 0.3 + 1.0
 		for x in range(low_width):
 			var idx: int = y * low_width + x
-			var fall_left: float = clampf(1.0 - absf(float(x) - left_center) / (band * 0.5), 0.0, 1.0)
-			var fall_right: float = clampf(1.0 - absf(float(x) - right_center) / (band * 0.5), 0.0, 1.0)
-			var mask: float = smoothstep(0.0, 1.0, maxf(fall_left, fall_right))
-			low_mountain_mask[idx] = mask
+			var fx: float = float(x)
+			var fy: float = float(y)
 
-			var ridge: float = (ridge_noise.get_noise_2d(float(x), float(y)) + 1.0) * 0.5
-			ridge = pow(ridge, 1.4)
-			
-			var peak_mod_left: float = 1.0 + (peak_left - 0.5) * 0.8 * fall_left
-			var peak_mod_right: float = 1.0 + (peak_right - 0.5) * 0.8 * fall_right
-			var mountain_h: float = mask * ridge * GameConfig.MOUNTAIN_HEIGHT_SCALE
-			mountain_h *= maxf(peak_mod_left, peak_mod_right)
-			if fall_left > 0.01:
-				var exp_fall_left: float = pow(fall_left, slope_exp_left)
-				mountain_h = maxf(mountain_h, exp_fall_left * ridge * GameConfig.MOUNTAIN_HEIGHT_SCALE * 0.7)
-			if fall_right > 0.01:
-				var exp_fall_right: float = pow(fall_right, slope_exp_right)
-				mountain_h = maxf(mountain_h, exp_fall_right * ridge * GameConfig.MOUNTAIN_HEIGHT_SCALE * 0.7)
+			# --- domain warp ------------------------------------------------
+			var wx: float = fx + warp_a.get_noise_2d(fx, fy) * warp_amp \
+				+ warp_c.get_noise_2d(fx, fy) * warp_amp * 0.30
+			var wy: float = fy + warp_b.get_noise_2d(fx, fy) * warp_amp \
+				+ warp_c.get_noise_2d(fy, fx) * warp_amp * 0.30
 
-			var valley_center: float = (left_center + right_center) * 0.5
-			var valley_half: float = maxf(1.0, (right_center - left_center) * 0.5)
-			var basin: float = clampf(1.0 - absf(float(x) - valley_center) / valley_half, 0.0, 1.0)
+			# --- soft, breathing band weight, measured in WARPED space ------
+			var half_w: float = (band * 0.5) * (1.0 + width_noise.get_noise_1d(fy) * 0.55)
+			half_w = maxf(half_w, 3.0)
+			var fall_left: float = clampf(1.0 - absf(wx - left_centers[y]) / half_w, 0.0, 1.0)
+			var fall_right: float = clampf(1.0 - absf(wx - right_centers[y]) / half_w, 0.0, 1.0)
+			var weight: float = smoothstep(0.0, 1.0, maxf(fall_left, fall_right))
+
+			# --- ridged massif ---------------------------------------------
+			var ridge: float = (ridge_noise.get_noise_2d(wx, wy) + 1.0) * 0.5
+
+			# Multiply, then threshold. Below the threshold there is simply no
+			# mountain, which is what produces passes and ragged margins.
+			var raw: float = weight * ridge
+			var massif: float = 0.0
+			if raw > thresh:
+				massif = pow((raw - thresh) / (1.0 - thresh), 1.25)
+
+			var mountain_h: float = massif * GameConfig.MOUNTAIN_HEIGHT_SCALE
+			low_mountain_mask[idx] = clampf(massif * 1.4, 0.0, 1.0)
+
+			# --- valley floor ----------------------------------------------
+			var valley_center: float = (left_centers[y] + right_centers[y]) * 0.5
+			var valley_half: float = maxf(1.0, (right_centers[y] - left_centers[y]) * 0.5)
+			var basin: float = clampf(1.0 - absf(fx - valley_center) / valley_half, 0.0, 1.0)
 			var floor_h: float = GameConfig.VALLEY_BASE_ELEVATION - GameConfig.VALLEY_BASIN_DEPTH * basin + long_slope
 
 			var h: float = floor_h + mountain_h
-			var peak_smooth: float = 1.0 - clampf((maxf(fall_left, fall_right) - 0.3) / 0.7, 0.0, 1.0) * 0.4
-			h += detail_noise.get_noise_2d(float(x), float(y)) * (0.5 + mask * 3.0) * peak_smooth
+			# Roughness scales with how mountainous the tile is, so the valley
+			# floor stays smooth enough for the drainage tracer to read.
+			h += detail_noise.get_noise_2d(fx, fy) * (0.4 + massif * 3.5)
 			low_elevation[idx] = h
-	
+
 	# Upscale low-res terrain to full resolution with bilinear interpolation
 	for y in range(height):
 		for x in range(width):
@@ -137,35 +171,28 @@ static func generate(width: int, height: int, rng_seed: int) -> Dictionary:
 			var y0: int = int(floorf(low_y))
 			var x1: int = mini(x0 + 1, low_width - 1)
 			var y1: int = mini(y0 + 1, low_height - 1)
-			var fx: float = low_x - x0
-			var fy: float = low_y - y0
-			
+			var fx2: float = low_x - x0
+			var fy2: float = low_y - y0
+
 			var idx: int = y * width + x
 			var idx00: int = y0 * low_width + x0
 			var idx10: int = y0 * low_width + x1
 			var idx01: int = y1 * low_width + x0
 			var idx11: int = y1 * low_width + x1
-			
-			var h00: float = low_elevation[idx00]
-			var h10: float = low_elevation[idx10]
-			var h01: float = low_elevation[idx01]
-			var h11: float = low_elevation[idx11]
-			
-			var h_interp: float = lerp(lerp(h00, h10, fx), lerp(h01, h11, fx), fy)
-			
-			var m00: float = low_mountain_mask[idx00]
-			var m10: float = low_mountain_mask[idx10]
-			var m01: float = low_mountain_mask[idx01]
-			var m11: float = low_mountain_mask[idx11]
-			var m_interp: float = lerp(lerp(m00, m10, fx), lerp(m01, m11, fx), fy)
-			
-			# Add fine detail at full resolution. Kept small on purpose: the
-			# whole valley only drops VALLEY_LONG_SLOPE (~7) end to end, so
-			# large per-tile noise here swamps the regional gradient and the
-			# drainage tracer can no longer find its way downhill.
-			var fine_detail: float = detail_noise.get_noise_2d(float(x), float(y)) * 0.12
-			elevation[idx] = h_interp + fine_detail
+
+			var h_interp: float = lerp(
+				lerp(low_elevation[idx00], low_elevation[idx10], fx2),
+				lerp(low_elevation[idx01], low_elevation[idx11], fx2), fy2)
+			var m_interp: float = lerp(
+				lerp(low_mountain_mask[idx00], low_mountain_mask[idx10], fx2),
+				lerp(low_mountain_mask[idx01], low_mountain_mask[idx11], fx2), fy2)
+
+			# Fine detail, kept small: the whole valley only drops
+			# VALLEY_LONG_SLOPE end to end, so large per-tile noise here swamps
+			# the regional gradient the wadi tracer needs.
+			elevation[idx] = h_interp + detail_noise.get_noise_2d(float(x), float(y)) * 0.12
 			mountain_mask[idx] = m_interp
+
 
 	# The range centrelines were computed in low-resolution space: indexed by
 	# low_y and measured in low_x units. Every later pass works at full
@@ -200,10 +227,15 @@ static func generate(width: int, height: int, rng_seed: int) -> Dictionary:
 				dune = pow(dune, 2.0)
 				elevation[idx] += dune * GameConfig.DUNE_HEIGHT
 
+			# Classified from RELIEF above the valley floor, which is what
+			# mountain_mask now carries -- the massif itself, its spurs and margins
+			# and all. Absolute height cannot be used: the valley floor rises
+			# by VALLEY_LONG_SLOPE toward the north, so a fixed threshold
+			# would turn the whole northern half of the valley into scree.
 			var t: int
-			if mask > GameConfig.ROCK_SLOPE_THRESHOLD:
+			if mask > GameConfig.ROCK_RELIEF:
 				t = TERRAIN_ROCK
-			elif mask > 0.22:
+			elif mask > GameConfig.SCREE_RELIEF:
 				t = TERRAIN_SCREE
 			elif wadi > 0.2:
 				t = TERRAIN_ALLUVIUM

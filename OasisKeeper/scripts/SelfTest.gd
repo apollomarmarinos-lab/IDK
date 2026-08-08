@@ -16,6 +16,8 @@ var _aquifer_body: int = -1
 var _gate_idx: int = -1
 var _gate_placed: bool = false
 var _gate_toggled: bool = false
+var _reservoir_origin: int = -1
+var _basin_checked: bool = false
 
 static func run(host: Node) -> void:
 	var t := SelfTest.new()
@@ -67,9 +69,11 @@ func _build() -> void:
 	# 4. Storage + shade, out on the valley floor.
 	var vx: int = WorldMap.width / 2
 	var vy: int = WorldMap.height / 2
-	print("SELFTEST reservoir -> ", BuildSystem.place(WorldMap.index_of(vx, vy), WorldMap.Structure.RESERVOIR))
-	print("SELFTEST cistern   -> ", BuildSystem.place(WorldMap.index_of(vx + 2, vy), WorldMap.Structure.CISTERN))
-	print("SELFTEST shade     -> ", BuildSystem.place(WorldMap.index_of(vx + 4, vy), WorldMap.Structure.SHADE_STRUCTURE))
+	_reservoir_origin = WorldMap.index_of(vx, vy)
+	print("SELFTEST reservoir %s -> %s" % [BuildSystem.footprint_of(WorldMap.Structure.RESERVOIR),
+		BuildSystem.place(_reservoir_origin, WorldMap.Structure.RESERVOIR)])
+	print("SELFTEST cistern   -> ", BuildSystem.place(WorldMap.index_of(vx + 6, vy), WorldMap.Structure.CISTERN))
+	print("SELFTEST shade     -> ", BuildSystem.place(WorldMap.index_of(vx + 14, vy), WorldMap.Structure.SHADE_STRUCTURE))
 
 	# 5. A well, wherever groundwater actually exists.
 	var gw_tiles: int = 0
@@ -208,6 +212,19 @@ func _process(_delta: float) -> void:
 		print("SELFTEST gate closed -> conducts=", WorldMap.conducts_water(_gate_idx))
 		BuildSystem.toggle_gate(_gate_idx)
 		print("SELFTEST gate reopened -> conducts=", WorldMap.conducts_water(_gate_idx))
+
+	# Once the basin has finished digging, confirm its footprint and inlets.
+	if not _basin_checked and _reservoir_origin >= 0 \
+			and WorldMap.structure_type[_reservoir_origin] == WorldMap.Structure.RESERVOIR:
+		_basin_checked = true
+		var tiles: int = 0
+		var inlets: int = 0
+		for i in range(WorldMap.width * WorldMap.height):
+			if WorldMap.structure_owner[i] == _reservoir_origin:
+				tiles += 1
+				if WorldMap.is_inlet[i] == 1:
+					inlets += 1
+		print("SELFTEST basin: %d tiles, %d inlets" % [tiles, inlets])
 
 	if _frame % 600 != 0 or _chain.is_empty():
 		return

@@ -183,6 +183,8 @@ func _flow_pass() -> void:
 			# network could never be woken again.
 			if not WorldMap.conducts_water(nidx):
 				continue
+			if not WorldMap.water_may_pass(idx_i, nidx):
+				continue # basin rim: only inlets exchange with the outside
 			if WorldMap.water[nidx] >= WorldMap.water_capacity(nidx):
 				continue
 			var diff: float = self_head - WorldMap.head(nidx)
@@ -195,7 +197,14 @@ func _flow_pass() -> void:
 		if targets.is_empty() or total_diff <= 0.0:
 			continue
 
-		var budget: float = minf(GameConfig.FLOW_RATE, WorldMap.water[idx_i])
+		# Pressure: a fuller channel pushes harder. Head difference already
+		# sets which way water goes and roughly how fast; this adds the
+		# separate effect that a brim-full channel drives its outflow harder
+		# than a trickle sitting at the same gradient, so a well-fed line
+		# delivers noticeably more than a starved one.
+		var fill: float = WorldMap.water[idx_i] / maxf(0.001, WorldMap.water_capacity(idx_i))
+		var pressure: float = 1.0 + clampf(fill, 0.0, 1.0) * GameConfig.FLOW_PRESSURE_BOOST
+		var budget: float = minf(GameConfig.FLOW_RATE * pressure, WorldMap.water[idx_i])
 		for t in range(targets.size()):
 			var nidx: int = targets[t]
 			var share: float = diffs[t] / total_diff

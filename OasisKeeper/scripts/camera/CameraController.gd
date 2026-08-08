@@ -5,6 +5,10 @@ extends Camera2D
 @export var zoom_speed: float = 0.1
 @export var min_zoom: float = 0.2 ## zoomed out far enough to see the whole valley
 @export var max_zoom: float = 4.0
+## Screen margin, in pixels, where the cursor starts scrolling the map.
+@export var edge_scroll_margin: float = 14.0
+
+var _panning: bool = false
 
 func _ready() -> void:
 	make_current()
@@ -22,6 +26,7 @@ func _ready() -> void:
 
 func _process(delta: float) -> void:
 	var dir := Vector2.ZERO
+	dir += _edge_scroll_direction()
 	if Input.is_action_pressed("ui_left"):
 		dir.x -= 1
 	if Input.is_action_pressed("ui_right"):
@@ -40,6 +45,37 @@ func _unhandled_input(event: InputEvent) -> void:
 			_zoom_by(1.0 + zoom_speed)
 		elif mb.button_index == MOUSE_BUTTON_WHEEL_DOWN and mb.pressed:
 			_zoom_by(1.0 - zoom_speed)
+		elif mb.button_index == MOUSE_BUTTON_MIDDLE:
+			# Middle-drag pans. Left is the build tool and right cancels it,
+			# so the middle button is the one left free for grabbing the map.
+			_panning = mb.pressed
+	elif event is InputEventMouseMotion and _panning:
+		# Divide by zoom so the ground keeps pace with the cursor at any
+		# zoom level -- otherwise dragging feels sluggish zoomed out and
+		# twitchy zoomed in.
+		position -= event.relative / zoom.x
+
+## Cursor near a screen edge nudges the camera that way, the usual RTS
+## behaviour. Ignored while middle-dragging, which would fight it.
+func _edge_scroll_direction() -> Vector2:
+	if _panning:
+		return Vector2.ZERO
+	var vp: Vector2 = get_viewport_rect().size
+	var m: Vector2 = get_viewport().get_mouse_position()
+	if m.x < 0.0 or m.y < 0.0 or m.x > vp.x or m.y > vp.y:
+		return Vector2.ZERO
+	var d := Vector2.ZERO
+	if m.x < edge_scroll_margin:
+		d.x -= 1.0
+	elif m.x > vp.x - edge_scroll_margin:
+		d.x += 1.0
+	# Leave the top and bottom bars alone, or the map crawls whenever the
+	# cursor is anywhere near the build menu.
+	if m.y < GameConfig.UI_TOP_BAR_HEIGHT + edge_scroll_margin and m.y > GameConfig.UI_TOP_BAR_HEIGHT:
+		d.y -= 1.0
+	elif m.y > vp.y - GameConfig.UI_BOTTOM_BAR_HEIGHT - edge_scroll_margin and m.y < vp.y - GameConfig.UI_BOTTOM_BAR_HEIGHT:
+		d.y += 1.0
+	return d
 
 func _zoom_by(factor: float) -> void:
 	var new_zoom: float = clampf(zoom.x * factor, min_zoom, max_zoom)

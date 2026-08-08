@@ -38,9 +38,9 @@ const CATEGORIES: Array = [
 		"blurb": "Bank water for the dry season, and tap valley groundwater.",
 		"tools": [
 			{"id": &"reservoir", "label": "Reservoir", "key": "Q",
-			 "desc": "Large open pond. Holds a lot, but the surface evaporates. Shade it with palms to cut the losses."},
+			 "desc": "A multi-tile open basin -- 3x3 by default. Press R to cycle 3x3 / 3x5 / 5x3.\n\nWater moves freely inside the footprint, so the whole thing behaves as one pool, but the rim is a bank: it only fills and drains through the INLET in the middle of each side. Run a canal into an inlet.\n\nOpen to the sky, so it evaporates. Shade it with palms to cut the losses."},
 			{"id": &"cistern", "label": "Cistern", "key": "W",
-			 "desc": "Covered storage. Holds even more than a reservoir and loses virtually nothing. The right place to bank water for summer."},
+			 "desc": "The same multi-tile basin, roofed. Press R to cycle the footprint.\n\nHolds more than a reservoir and loses virtually nothing to evaporation. The right place to bank water for summer."},
 			{"id": &"well", "label": "Well", "key": "E",
 			 "desc": "Sunk over a rare valley groundwater pocket. Modest but steady yield. Switch on the Groundwater overlay to find a spot -- it will refuse to build anywhere else."},
 		],
@@ -408,6 +408,16 @@ func _unhandled_input(event: InputEvent) -> void:
 			_on_category_pressed(category["id"])
 			get_viewport().set_input_as_handled()
 			return
+	# R cycles the footprint of multi-tile basins.
+	if k == "R" and (_current_tool == &"reservoir" or _current_tool == &"cistern"):
+		BuildSystem.cycle_basin_size()
+		_desc_label.text = "[b]%s[/b]\nFootprint: %dx%d  (R to cycle)\n%s" % [
+			_tool_label(_current_tool),
+			BuildSystem.footprint_of(TOOL_STRUCTURE[_current_tool]).x,
+			BuildSystem.footprint_of(TOOL_STRUCTURE[_current_tool]).y,
+			_tool_desc(_current_tool)]
+		get_viewport().set_input_as_handled()
+		return
 	# Item hotkeys apply only while their category is open.
 	if _open_category != &"":
 		var category: Dictionary = _find_category(_open_category)

@@ -6,6 +6,7 @@ extends Control
 var _date_label: Label
 var _weather_label: Label
 var _water_label: Label
+var _perf_label: Label
 var _inventory_label: Label
 var _speed_buttons: Array[Button] = []
 
@@ -31,6 +32,11 @@ func _ready() -> void:
 	_weather_label = Label.new()
 	_weather_label.custom_minimum_size = Vector2(280, 0)
 	row.add_child(_weather_label)
+
+	_perf_label = Label.new()
+	_perf_label.custom_minimum_size = Vector2(190, 0)
+	_perf_label.add_theme_color_override("font_color", Color(0.65, 0.85, 0.65))
+	row.add_child(_perf_label)
 
 	_water_label = Label.new()
 	_water_label.custom_minimum_size = Vector2(210, 0)
@@ -66,11 +72,15 @@ func _process(_delta: float) -> void:
 	if WorldMap.width > 0:
 		var cx: int = WorldMap.width / 2
 		var cy: int = WorldMap.height / 2
-		deg = WorldMap.temperature[WorldMap.index_of(cx, cy)]
+		deg = ClimateSystem.temperature_at(WorldMap.index_of(cx, cy))
 	_weather_label.text = "%.0f C   Wind %.0f%% %s" % [
 		deg, ClimateSystem.wind_speed * 100.0, _wind_arrow(ClimateSystem.wind_direction)
 	]
 	_water_label.text = "Water stored: %.0f" % WaterSystem.total_stored_water()
+	# Frame rate plus the cost of the last simulation tick, which is the
+	# number that actually moves when the world gets busy.
+	_perf_label.text = "%d FPS   tick %.1f ms" % [
+		Engine.get_frames_per_second(), GameClock.last_tick_msec]
 
 func _wind_arrow(dir: Vector2) -> String:
 	var angle: float = dir.angle()

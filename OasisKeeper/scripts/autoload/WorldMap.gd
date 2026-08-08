@@ -50,11 +50,15 @@ var flow_y: PackedFloat32Array = PackedFloat32Array()
 # Dynamic climate layers
 var air_moisture: PackedFloat32Array = PackedFloat32Array()
 var shade: PackedFloat32Array = PackedFloat32Array()
-var temperature: PackedFloat32Array = PackedFloat32Array()
 
 # Structures
 var structure_type: PackedByteArray = PackedByteArray()
 var gate_open: PackedByteArray = PackedByteArray() ## 1 = open, 0 = closed; only meaningful where structure_type == GATE
+## For multi-tile buildings: the origin tile every footprint tile belongs to
+## (-1 when the tile is not part of one), and whether a tile is an opening in
+## the rim through which water may enter or leave.
+var structure_owner: PackedInt32Array = PackedInt32Array()
+var is_inlet: PackedByteArray = PackedByteArray()
 
 func generate(rng_seed: int = -1) -> void:
 	width = GameConfig.MAP_WIDTH
@@ -80,7 +84,6 @@ func generate(rng_seed: int = -1) -> void:
 	flow_x = _new_float_layer(size)
 	flow_y = _new_float_layer(size)
 	shade = _new_float_layer(size)
-	temperature = _new_float_layer(size)
 
 	air_moisture = _new_float_layer(size)
 	air_moisture.fill(0.06) # ambient desert humidity baseline
@@ -92,6 +95,11 @@ func generate(rng_seed: int = -1) -> void:
 	structure_type.resize(size)
 	gate_open = PackedByteArray()
 	gate_open.resize(size)
+	structure_owner = PackedInt32Array()
+	structure_owner.resize(size)
+	structure_owner.fill(-1)
+	is_inlet = PackedByteArray()
+	is_inlet.resize(size)
 
 	EventBus.emit_signal("world_generated")
 
@@ -152,6 +160,23 @@ func is_canal(idx: int) -> bool:
 	var s: int = structure_type[idx]
 	return s == Structure.CANAL_OPEN or s == Structure.CANAL_COVERED or s == Structure.CANAL_MOUNTAIN
 
+## Whether water may pass between these two adjacent tiles.
+##
+## Inside one basin footprint water always moves freely -- that is what makes
+## a 3x3 reservoir behave as a single pool. Crossing a basin's edge is only
+## allowed through an inlet, so the rim acts as a bank rather than seeping
+## along its entire perimeter.
+func water_may_pass(a: int, b: int) -> bool:
+	var owner_a: int = structure_owner[a]
+	var owner_b: int = structure_owner[b]
+	if owner_a >= 0 and owner_a == owner_b:
+		return true
+	if owner_a >= 0 and is_inlet[a] == 0:
+		return false
+	if owner_b >= 0 and is_inlet[b] == 0:
+		return false
+	return true
+
 ## True if water can currently move through this tile.
 func conducts_water(idx: int) -> bool:
 	var s: int = structure_type[idx]
@@ -173,6 +198,8 @@ func is_open_to_sky(idx: int) -> bool:
 func reset_tile_structure(idx: int) -> void:
 	structure_type[idx] = Structure.NONE
 	gate_open[idx] = 0
+	structure_owner[idx] = -1
+	is_inlet[idx] = 0
 	water[idx] = 0.0
 	flow_x[idx] = 0.0
 	flow_y[idx] = 0.0

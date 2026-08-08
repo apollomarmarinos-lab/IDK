@@ -23,6 +23,9 @@ var is_night: bool = false
 var day_fraction: float = 0.25
 
 var _tick_accumulator: float = 0.0
+## Wall-clock cost of the last simulation tick, surfaced in the HUD so the
+## expensive systems are visible rather than guessed at.
+var last_tick_msec: float = 0.0
 
 func _ready() -> void:
 	_update_night_state(true)
@@ -72,10 +75,12 @@ func _update_night_state(force: bool) -> void:
 		EventBus.emit_signal("day_started")
 
 func _simulate_tick() -> void:
+	var started: int = Time.get_ticks_usec()
 	ClimateSystem.simulate_tick()
 	WaterSystem.simulate_tick()
 	PlantSystem.simulate_tick()
 	BuildSystem.simulate_tick()
+	last_tick_msec = float(Time.get_ticks_usec() - started) / 1000.0
 
 ## Smooth 0..1 curve peaking at solar noon (0.5 day_fraction), used by
 ## ClimateSystem for the temperature curve and by renderers for lighting.

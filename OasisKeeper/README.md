@@ -65,6 +65,12 @@ Inspect and Demolish are direct tools -- they select immediately and close
 the panel.
 
 - **Left click / drag** on the map: apply the selected tool.
+- **Middle-drag**: pan the map. Cursor at a screen edge also scrolls.
+- Canals and terraform tools **drag as an L-shaped run**: press at the start,
+  drag to the end, and the route previews tile by tile (green where it can
+  build, red where it cannot) before committing on release.
+- **R** cycles a basin's footprint (3x3 / 3x5 / 5x3) while Reservoir or
+  Cistern is selected.
 - **Right click**: back to Inspect.
 - **Number keys**: pick a category (shown on each button). While a category
   is open, **Q/W/E** pick items within it.
@@ -177,6 +183,17 @@ comes in open (**Reservoir**, evaporates, shade it with palms) and covered
 (**Cistern**, holds more, loses nearly nothing) forms. **Wells** tap rare
 shallow groundwater pockets on the valley floor -- use the Groundwater
 overlay to find somewhere worth sinking one.
+
+## Basins are multi-tile
+
+Reservoirs and cisterns are 3x3 by default, with 3x5 and 5x3 variants. Every
+tile of the footprint is an ordinary water tile, so the existing flow model
+makes the whole thing behave as one pool with no special-cased shared volume.
+
+The rim is a **bank**: water only crosses a basin's edge through the *inlet*
+in the middle of each side (drawn in cyan). Run a canal into an inlet to fill
+it. Without that rule a basin would seep along its entire perimeter, which
+would make it a wide canal rather than a reservoir.
 
 ## The oasis effect
 

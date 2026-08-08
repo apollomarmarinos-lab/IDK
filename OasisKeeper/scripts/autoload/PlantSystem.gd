@@ -128,7 +128,7 @@ func _consume_water(p: PlantInstance, idx: int, days_per_tick: float) -> void:
 		p.health = clampf(p.health + days_per_tick * 0.5, 0.0, 1.0)
 
 func _apply_climate_stress(p: PlantInstance, idx: int, days_per_tick: float) -> void:
-	var temp: float = WorldMap.temperature[idx]
+	var temp: float = ClimateSystem.temperature_at(idx)
 	if temp > p.data.heat_tolerance_c:
 		var shade_relief: float = WorldMap.shade[idx]
 		var exceedance: float = (temp - p.data.heat_tolerance_c) * (1.0 - shade_relief * 0.9)

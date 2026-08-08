@@ -13,6 +13,11 @@ var current_tool: StringName = &"inspect"
 var selected_plant_id: StringName = &""
 var _dragging: bool = false
 var _painted_this_drag: Dictionary = {}
+## Anchor tile of an L-shaped drag, and the path it currently previews.
+var _drag_anchor: int = -1
+var _drag_path: PackedInt32Array = PackedInt32Array()
+## Tools laid out as a line rather than painted tile by tile.
+const LINE_TOOLS := [&"canal_open", &"canal_covered", &"raise_ground", &"lower_ground"]
 
 func _ready() -> void:
 	randomize()
@@ -41,16 +46,27 @@ func _process(_delta: float) -> void:
 func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventMouseMotion:
 		if _dragging:
-			_apply_tool_at_mouse()
+			if _is_line_tool():
+				_update_drag_path()
+			else:
+				_apply_tool_at_mouse()
 	elif event is InputEventMouseButton:
 		var mb: InputEventMouseButton = event
 		if mb.button_index == MOUSE_BUTTON_LEFT:
 			if mb.pressed:
 				_dragging = true
 				_painted_this_drag.clear()
-				_apply_tool_at_mouse()
+				if _is_line_tool():
+					# Line tools commit on release, so the whole run can be
+					# previewed and re-aimed before anything is built.
+					_drag_anchor = _tile_at_mouse()
+					_update_drag_path()
+				else:
+					_apply_tool_at_mouse()
 			else:
 				_dragging = false
+				if _is_line_tool():
+					_commit_drag_path()
 		elif mb.button_index == MOUSE_BUTTON_RIGHT and mb.pressed:
 			build_menu.select_tool_externally(&"inspect")
 
@@ -68,6 +84,9 @@ func _apply_tool_at_mouse() -> void:
 	if idx < 0 or _painted_this_drag.has(idx):
 		return
 	_painted_this_drag[idx] = true
+	_apply_tool_to(idx)
+
+func _apply_tool_to(idx: int) -> void:
 	match current_tool:
 		&"inspect":
 			world.set_selected_tile(idx)
@@ -101,8 +120,55 @@ func _apply_tool_at_mouse() -> void:
 		&"lower_ground":
 			BuildSystem.queue_terraform(idx, -1)
 
+func _is_line_tool() -> bool:
+	return LINE_TOOLS.has(current_tool)
+
+## Builds the L-shaped route between the drag anchor and the cursor. The
+## dominant axis is walked first, which is what makes a drag feel like it
+## follows the direction you started in.
+func _update_drag_path() -> void:
+	_drag_path = PackedInt32Array()
+	var target: int = _tile_at_mouse()
+	if _drag_anchor < 0 or target < 0:
+		world.set_drag_path(_drag_path)
+		return
+	var a: Vector2i = WorldMap.coords_of(_drag_anchor)
+	var b: Vector2i = WorldMap.coords_of(target)
+	var horizontal_first: bool = absi(b.x - a.x) >= absi(b.y - a.y)
+
+	var x: int = a.x
+	var y: int = a.y
+	_drag_path.append(WorldMap.index_of(x, y))
+	if horizontal_first:
+		while x != b.x:
+			x += signi(b.x - x)
+			_drag_path.append(WorldMap.index_of(x, y))
+		while y != b.y:
+			y += signi(b.y - y)
+			_drag_path.append(WorldMap.index_of(x, y))
+	else:
+		while y != b.y:
+			y += signi(b.y - y)
+			_drag_path.append(WorldMap.index_of(x, y))
+		while x != b.x:
+			x += signi(b.x - x)
+			_drag_path.append(WorldMap.index_of(x, y))
+	world.set_drag_path(_drag_path)
+
+func _commit_drag_path() -> void:
+	for idx in _drag_path:
+		_apply_tool_to(idx)
+	_drag_path = PackedInt32Array()
+	_drag_anchor = -1
+	world.set_drag_path(_drag_path)
+
 func _on_tool_selected(tool_name: StringName) -> void:
 	current_tool = tool_name
+	# Dropping a half-drawn line when the tool changes avoids building the
+	# previous tool's route with the new tool.
+	_drag_path = PackedInt32Array()
+	_drag_anchor = -1
+	world.set_drag_path(_drag_path)
 
 func _on_plant_selected(plant_id: StringName) -> void:
 	selected_plant_id = plant_id
