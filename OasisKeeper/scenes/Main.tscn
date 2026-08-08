@@ -16,6 +16,8 @@ script = ExtResource("2")
 
 [node name="TerrainSprite" type="Sprite2D" parent="World"]
 
+[node name="GrainSprite" type="Sprite2D" parent="World"]
+
 [node name="MoistureSprite" type="Sprite2D" parent="World"]
 
 [node name="ShadeSprite" type="Sprite2D" parent="World"]

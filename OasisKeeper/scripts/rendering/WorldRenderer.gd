@@ -13,6 +13,7 @@ extends Node2D
 enum Overlay { NONE, AQUIFER, GROUNDWATER, MOISTURE, SHADE, FERTILITY }
 
 @onready var terrain_sprite: Sprite2D = $TerrainSprite
+@onready var grain_sprite: Sprite2D = $GrainSprite
 @onready var moisture_sprite: Sprite2D = $MoistureSprite
 @onready var shade_sprite: Sprite2D = $ShadeSprite
 @onready var overlay_sprite: Sprite2D = $OverlaySprite
@@ -29,6 +30,8 @@ var hovered_tile: int = -1
 var ghost_structure: int = -1 ## structure the active build tool would place
 
 const T: float = float(GameConfig.TILE_PIXEL_SIZE)
+## Screen pixels per grain texel. ~1.5 keeps the grain crisp but not noisy.
+const GRAIN_SCALE: float = 1.5
 
 # Channel geometry, in fractions of a tile.
 const CHANNEL_HALF_WIDTH: float = 0.30
@@ -51,8 +54,12 @@ var _neighbor_buf: PackedInt32Array = PackedInt32Array([0, 0, 0, 0])
 func _ready() -> void:
 	add_to_group("world_renderer")
 	terrain_sprite.centered = false
+	# Nearest, so tile boundaries stay crisp instead of blurring into each
+	# other. Fine texture comes from the baked sub-pixel noise and the tiled
+	# grain layer, not from filtering.
 	terrain_sprite.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 	terrain_sprite.scale = Vector2.ONE * (T / float(GameConfig.TERRAIN_DETAIL))
+	_setup_grain()
 	for s: Sprite2D in [moisture_sprite, shade_sprite, overlay_sprite]:
 		s.centered = false
 		# Linear filtering turns the 1px-per-tile data layers into smooth
@@ -72,8 +79,25 @@ func _ready() -> void:
 	flow_layer.draw.connect(_draw_flow)
 	selection_layer.draw.connect(_draw_selection)
 
+## Repeats one small noise tile across the whole map with multiply blending,
+## giving per-screen-pixel grain for free instead of baking a million pixels.
+func _setup_grain() -> void:
+	grain_sprite.centered = false
+	grain_sprite.texture = TerrainBaker.make_grain_texture()
+	grain_sprite.texture_repeat = CanvasItem.TEXTURE_REPEAT_ENABLED
+	grain_sprite.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
+	var mat := CanvasItemMaterial.new()
+	mat.blend_mode = CanvasItemMaterial.BLEND_MODE_MUL
+	grain_sprite.material = mat
+	grain_sprite.scale = Vector2.ONE * GRAIN_SCALE
+	grain_sprite.region_enabled = true
+
 func _on_world_generated() -> void:
 	terrain_sprite.texture = ImageTexture.create_from_image(TerrainBaker.bake(WorldMap.width, WorldMap.height))
+	# Region larger than the texture + repeat enabled == tiled fill.
+	grain_sprite.region_rect = Rect2(0, 0,
+		float(WorldMap.width) * T / GRAIN_SCALE,
+		float(WorldMap.height) * T / GRAIN_SCALE)
 	var size: int = WorldMap.width * WorldMap.height
 	_moisture_data.resize(size * 4)
 	_shade_data.resize(size * 4)
