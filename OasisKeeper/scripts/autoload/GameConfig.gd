@@ -17,11 +17,8 @@ extends Node
 # ---------------------------------------------------------------------------
 const MAP_WIDTH: int = 180
 const MAP_HEIGHT: int = 120
-const TILE_PIXEL_SIZE: int = 24 ## on-screen pixel size of one simulation tile
-## Sub-pixels per tile in the baked terrain image. 4 gives enough sub-tile
-## relief and material texture to read as landform; finer detail at high
-## zoom comes from the tiled grain layer in WorldRenderer.
-const TERRAIN_DETAIL: int = 4
+const TILE_PIXEL_SIZE: int = 72 ## on-screen pixel size of one simulation tile
+const TERRAIN_DETAIL: int = 4 ## sub-pixels per tile in the baked terrain image
 
 # ---------------------------------------------------------------------------
 # Time
