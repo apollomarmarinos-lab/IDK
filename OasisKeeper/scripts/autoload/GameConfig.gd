@@ -15,13 +15,10 @@ extends Node
 # ---------------------------------------------------------------------------
 # World / grid
 # ---------------------------------------------------------------------------
-const MAP_WIDTH: int = 180
-const MAP_HEIGHT: int = 120
-const TILE_PIXEL_SIZE: int = 24 ## on-screen pixel size of one simulation tile
-## Sub-pixels per tile in the baked terrain image. 4 gives enough sub-tile
-## relief and material texture to read as landform; finer detail at high
-## zoom comes from the tiled grain layer in WorldRenderer.
-const TERRAIN_DETAIL: int = 4
+const MAP_WIDTH: int = 360
+const MAP_HEIGHT: int = 240
+const TILE_PIXEL_SIZE: int = 72 ## on-screen pixel size of one simulation tile
+const TERRAIN_DETAIL: int = 4 ## sub-pixels per tile in the baked terrain image
 
 # ---------------------------------------------------------------------------
 # Time
@@ -83,9 +80,10 @@ const TUNNEL_DATUM_ELEVATION: float = VALLEY_BASE_ELEVATION + 1.5
 const RESERVOIR_CAPACITY: float = 260.0
 const CISTERN_CAPACITY: float = 340.0
 const WELL_RECHARGE_RATE: float = 0.5 ## from rare valley groundwater pockets
-## Fraction of the head difference moved between two connected tiles per tick.
-## High enough that water visibly runs along a canal within a few seconds.
-const FLOW_RATE: float = 0.45
+## Flow rate for water moving between connected canal tiles per tick.
+## Based on realistic flow in a ~2m wide channel with gentle slope: ~0.5-1 m/s
+## At 0.25s tick interval: ~0.125-0.25m per tick, scaled to tile units
+const FLOW_RATE: float = 2.5 ## water units moved per tick between connected tiles
 const MIN_FLOW_EPSILON: float = 0.005
 ## Fraction of a canal tile's water pulled into one adjacent dry soil tile
 ## per tick. Kept low deliberately: at high values the first few metres of
@@ -98,9 +96,14 @@ const FLOW_VECTOR_SMOOTHING: float = 0.35 ## smoothing for the on-screen flow ar
 # ---------------------------------------------------------------------------
 # Evaporation / transpiration / humidity
 # ---------------------------------------------------------------------------
-const BASE_EVAPORATION_COEFF: float = 0.035 ## fraction of open surface water lost per tick at reference conditions
-const COVERED_SEEPAGE_COEFF: float = 0.0015 ## covered channels: near-zero loss. This is the whole point of building them.
-const SOIL_EVAPORATION_COEFF: float = 0.015
+## Calm-Air Formula for 1m² water surface: E = 0.089 * (es - ea) / λ
+## where es = saturation vapor pressure at water temp, ea = actual vapor pressure.
+## Simplified for game: base rate scaled by temperature, wind, shade, humidity.
+## Reference: ~3-5 mm/day evaporation in desert conditions ≈ 0.003-0.005 m/day
+## At 0.25s tick interval and ~2m² tile area: ~0.0002-0.0004 per tick base rate
+const BASE_EVAPORATION_COEFF: float = 0.00035 ## fraction of open surface water lost per tick at reference conditions (calm-air formula scaled)
+const COVERED_SEEPAGE_COEFF: float = 0.000015 ## covered channels: near-zero loss. This is the whole point of building them.
+const SOIL_EVAPORATION_COEFF: float = 0.00015
 const WIND_EVAPORATION_FACTOR: float = 0.6 ## added evaporation per unit of wind speed (0..1 normalized)
 const SHADE_EVAPORATION_SUPPRESSION: float = 0.85 ## full shade cuts evaporation by up to this fraction
 const HUMIDITY_EVAPORATION_SUPPRESSION: float = 0.7 ## saturated local air suppresses evaporation

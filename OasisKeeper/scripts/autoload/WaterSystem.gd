@@ -103,46 +103,81 @@ func _tap_sources() -> void:
 func _flow_pass() -> void:
 	_flow_accum_x.fill(0.0)
 	_flow_accum_y.fill(0.0)
-
+	
+	# Build a list of active conducting tiles
+	var conducting_tiles: Array[int] = []
 	for idx in _active.keys():
 		var idx_i: int = idx
-		if not WorldMap.conducts_water(idx_i):
-			continue
+		if WorldMap.conducts_water(idx_i):
+			conducting_tiles.append(idx_i)
+	
+	# For each conducting tile, find the downstream neighbor (lowest head)
+	# and record the flow direction
+	var flow_targets: Dictionary = {} # idx -> downstream_idx
+	
+	for idx_i in conducting_tiles:
 		var head_a: float = WorldMap.head(idx_i)
 		var count: int = WorldMap.get_neighbors4(idx_i, _neighbor_buf)
+		var best_neighbor: int = -1
+		var best_head: float = head_a
+		
 		for n in range(count):
 			var nidx: int = _neighbor_buf[n]
-			if nidx <= idx_i:
-				continue # handle each undirected pair exactly once
 			if not _active.has(nidx) or not WorldMap.conducts_water(nidx):
 				continue
-			var diff: float = head_a - WorldMap.head(nidx)
-			if absf(diff) < GameConfig.MIN_FLOW_EPSILON:
+			var neighbor_head: float = WorldMap.head(nidx)
+			# Find the neighbor with the lowest head (downstream)
+			if neighbor_head < best_head:
+				best_head = neighbor_head
+				best_neighbor = nidx
+		
+		if best_neighbor >= 0:
+			flow_targets[idx_i] = best_neighbor
+	
+	# Now process flows from upstream to downstream
+	# We need to sort tiles so we process upstream tiles first
+	# Use a simple approach: iterate multiple times to propagate water
+	var max_iterations: int = conducting_tiles.size()
+	for iteration in range(max_iterations):
+		var any_flow: bool = false
+		
+		for idx_i in conducting_tiles:
+			if not flow_targets.has(idx_i):
 				continue
-			# Move a fraction of the head difference, clamped so neither side
-			# can go negative or overfill. Halved because each pair settles
-			# toward the midpoint.
-			var transfer: float = diff * GameConfig.FLOW_RATE * 0.5
-			if transfer > 0.0:
-				transfer = minf(transfer, WorldMap.water[idx_i])
-				transfer = minf(transfer, WorldMap.water_capacity(nidx) - WorldMap.water[nidx])
-			else:
-				transfer = maxf(transfer, -WorldMap.water[nidx])
-				transfer = maxf(transfer, -(WorldMap.water_capacity(idx_i) - WorldMap.water[idx_i]))
-			if absf(transfer) < GameConfig.MIN_FLOW_EPSILON:
+			
+			var downstream_idx: int = flow_targets[idx_i]
+			
+			# Check if upstream tile has water to give
+			if WorldMap.water[idx_i] <= GameConfig.MIN_FLOW_EPSILON:
 				continue
+			
+			# Check if downstream tile has room
+			var downstream_room: float = WorldMap.water_capacity(downstream_idx) - WorldMap.water[downstream_idx]
+			if downstream_room <= GameConfig.MIN_FLOW_EPSILON:
+				continue
+			
+			# Transfer water at a fixed rate
+			var transfer: float = minf(GameConfig.FLOW_RATE, WorldMap.water[idx_i])
+			transfer = minf(transfer, downstream_room)
+			
+			if transfer <= GameConfig.MIN_FLOW_EPSILON:
+				continue
+			
 			WorldMap.water[idx_i] -= transfer
-			WorldMap.water[nidx] += transfer
-			head_a = WorldMap.head(idx_i)
-
-			# Record the direction water actually moved, for the flow arrows.
-			var dx: int = (nidx % WorldMap.width) - (idx_i % WorldMap.width)
-			var dy: int = (nidx / WorldMap.width) - (idx_i / WorldMap.width)
+			WorldMap.water[downstream_idx] += transfer
+			any_flow = true
+			
+			# Record the flow direction for visualization
+			var dx: int = (downstream_idx % WorldMap.width) - (idx_i % WorldMap.width)
+			var dy: int = (downstream_idx / WorldMap.width) - (idx_i / WorldMap.width)
 			_flow_accum_x[idx_i] += float(dx) * transfer
 			_flow_accum_y[idx_i] += float(dy) * transfer
-			_flow_accum_x[nidx] += float(dx) * transfer
-			_flow_accum_y[nidx] += float(dy) * transfer
-
+			_flow_accum_x[downstream_idx] += float(dx) * transfer
+			_flow_accum_y[downstream_idx] += float(dy) * transfer
+		
+		if not any_flow:
+			break
+	
 	# Smooth the arrows so they don't jitter frame to frame.
 	var k: float = GameConfig.FLOW_VECTOR_SMOOTHING
 	for idx in _active.keys():

@@ -58,6 +58,8 @@ static func generate(width: int, height: int, rng_seed: int) -> Dictionary:
 	var meander_right := _make_noise(rng_seed + 202, FastNoiseLite.TYPE_PERLIN, 0.008, 2)
 	var peak_noise_left := _make_noise(rng_seed + 103, FastNoiseLite.TYPE_PERLIN, 0.025, 4)
 	var peak_noise_right := _make_noise(rng_seed + 203, FastNoiseLite.TYPE_PERLIN, 0.025, 4)
+	var slope_noise_left := _make_noise(rng_seed + 104, FastNoiseLite.TYPE_PERLIN, 0.015, 3)
+	var slope_noise_right := _make_noise(rng_seed + 204, FastNoiseLite.TYPE_PERLIN, 0.015, 3)
 	var dune_noise := _make_noise(rng_seed + 303, FastNoiseLite.TYPE_PERLIN, GameConfig.DUNE_FREQUENCY, 2)
 	var pavement_noise := _make_noise(rng_seed + 404, FastNoiseLite.TYPE_PERLIN, 0.03, 2)
 
@@ -79,6 +81,9 @@ static func generate(width: int, height: int, rng_seed: int) -> Dictionary:
 		# Peak influence along each range's centerline, varies per-row to create distinct peaks.
 		var peak_left: float = (peak_noise_left.get_noise_1d(float(y)) + 1.0) * 0.5
 		var peak_right: float = (peak_noise_right.get_noise_1d(float(y)) + 1.0) * 0.5
+		# Exponential slope weighting: elevation falls off exponentially from the ridge crest
+		var slope_exp_left: float = slope_noise_left.get_noise_1d(float(y)) * 0.3 + 1.0
+		var slope_exp_right: float = slope_noise_right.get_noise_1d(float(y)) * 0.3 + 1.0
 		for x in range(width):
 			var idx: int = y * width + x
 			var fall_left: float = clampf(1.0 - absf(float(x) - left_center) / (band * 0.5), 0.0, 1.0)
@@ -94,6 +99,14 @@ static func generate(width: int, height: int, rng_seed: int) -> Dictionary:
 			var peak_mod_right: float = 1.0 + (peak_right - 0.5) * 0.8 * fall_right
 			var mountain_h: float = mask * ridge * GameConfig.MOUNTAIN_HEIGHT_SCALE
 			mountain_h *= maxf(peak_mod_left, peak_mod_right)
+                        # Exponential slope weighting: apply exponential falloff from ridge
+                        # This creates steeper slopes near peaks and gentler foothills
+                        if fall_left > 0.01:
+                                var exp_fall_left: float = pow(fall_left, slope_exp_left)
+                                mountain_h = maxf(mountain_h, exp_fall_left * ridge * GameConfig.MOUNTAIN_HEIGHT_SCALE * 0.7)
+                        if fall_right > 0.01:
+                                var exp_fall_right: float = pow(fall_right, slope_exp_right)
+                                mountain_h = maxf(mountain_h, exp_fall_right * ridge * GameConfig.MOUNTAIN_HEIGHT_SCALE * 0.7)
 
 			var valley_center: float = (left_center + right_center) * 0.5
 			var valley_half: float = maxf(1.0, (right_center - left_center) * 0.5)

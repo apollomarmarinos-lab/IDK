@@ -1,57 +1,41 @@
-# Godot
-# The engine's import/analysis cache. Regenerated on open; must never be
-# committed (it is large, machine-specific and churns constantly).
-.godot/
-.import/
+```
+# Godot-specific ignores
+*.import
+*.remap
 export_presets.cfg
-export.cfg
-export_credentials.cfg
-*.translation
-
-# Note: *.import files next to assets ARE intentionally committed -- Godot
-# needs them to resolve imported resources on a fresh clone.
+.mobile_importer/
+.editor/
+.vs/
+.vscode/
 
 # Build artifacts
-build/
-dist/
-*.so
-*.dll
 *.exe
+*.dll
+*.so
 *.dylib
 *.pdb
-*.o
-*.obj
-*.a
+*.ilk
 
 # Dependencies
-node_modules/
-venv/
-.venv/
-__pycache__/
-*.pyc
-
-# Environment
-.env
-.env.local
-
-# Editors
-.vscode/
-.idea/
-*.swp
-*.swo
-*.tmp
-
-# System
-.DS_Store
-Thumbs.db
+*.gdns
+*.gdnlib
+*.tres
+*.res
 
 # Logs
 *.log
 
-# Archives
-*.zip
-*.gz
-*.tar
-*.tgz
-*.7z
-*.rar
+# Temporary files
+*.tmp
+*.temp
+*.backup
+
+# Environment
+.env
+.env.local
+*.env.*
+
+# OS specific
+.DS_Store
+Thumbs.db
+```
