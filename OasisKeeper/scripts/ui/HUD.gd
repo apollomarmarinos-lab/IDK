@@ -10,13 +10,14 @@ var _inventory_label: Label
 var _speed_buttons: Array[Button] = []
 
 func _ready() -> void:
-	set_anchors_preset(Control.PRESET_TOP_WIDE)
-	offset_bottom = 46.0
+	UILayout.top_bar(self, GameConfig.UI_TOP_BAR_HEIGHT)
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
+	visible = true
 
 	var bar := PanelContainer.new()
-	bar.set_anchors_preset(Control.PRESET_FULL_RECT)
+	UILayout.fill(bar)
 	bar.mouse_filter = Control.MOUSE_FILTER_STOP
+	UILayout.style_panel(bar, 8.0)
 	add_child(bar)
 
 	var row := HBoxContainer.new()

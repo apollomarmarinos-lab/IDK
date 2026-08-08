@@ -7,15 +7,15 @@ var _label: RichTextLabel
 var _tracked_tile: int = -1
 
 func _ready() -> void:
-	set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
-	offset_left = -330.0
-	offset_top = -300.0
-	offset_right = 0.0
-	offset_bottom = 0.0
+	# Sits above the bottom category bar so the two never overlap.
+	UILayout.bottom_right(self, GameConfig.UI_INSPECTOR_WIDTH,
+		GameConfig.UI_INSPECTOR_HEIGHT, GameConfig.UI_BOTTOM_BAR_HEIGHT)
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
+	visible = true
 
 	var panel := PanelContainer.new()
-	panel.set_anchors_preset(Control.PRESET_FULL_RECT)
+	UILayout.fill(panel)
+	UILayout.style_panel(panel)
 	add_child(panel)
 
 	_label = RichTextLabel.new()

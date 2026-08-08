@@ -4,8 +4,11 @@ extends CanvasModulate
 ## distinguishable but does not black out the map.
 
 const DAY_COLOR := Color(1.0, 0.98, 0.9)
-const DUSK_COLOR := Color(0.85, 0.55, 0.45)
-const NIGHT_COLOR := Color(0.32, 0.38, 0.62)
+const DUSK_COLOR := Color(0.92, 0.68, 0.52)
+## Moonlight, not darkness. The brief is explicit that night must be
+## visually distinct but still fully playable, so this never drops low
+## enough to hide the terrain.
+const NIGHT_COLOR := Color(0.58, 0.64, 0.86)
 
 func _process(_delta: float) -> void:
 	var sun: float = GameClock.get_sun_curve() # 0 at night, 1 at solar noon
