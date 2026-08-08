@@ -174,10 +174,27 @@ func water_capacity(idx: int) -> float:
 
 ## Elevation of the channel floor. Dug structures sit below grade, which is
 ## what makes water run downhill along a canal instead of pooling in place.
+##
+## The two *buried* channel types -- mountain tunnels and covered canals --
+## are cut to a gradient rather than following the ground surface, so their
+## floor is capped at a datum just above the valley floor. This is the qanat
+## principle, and it is load-bearing for the whole game: without it a
+## channel driven out of a range would have to climb the ridge crest and
+## then the scree apron of the foothills, and water would never reach the
+## valley at all. On flat valley ground the cap never binds, so open and
+## buried channels behave identically there.
+##
+## Open canals deliberately do NOT get this: they are trenches, they follow
+## the ground, and they cannot cross high land. That is the cost of the
+## cheaper tool.
 func floor_elevation(idx: int) -> float:
-	if structure_type[idx] == Structure.NONE:
+	var s: int = structure_type[idx]
+	if s == Structure.NONE:
 		return elevation[idx]
-	return elevation[idx] - GameConfig.CANAL_FLOOR_DEPTH
+	var dug: float = elevation[idx] - GameConfig.CANAL_FLOOR_DEPTH
+	if s == Structure.CANAL_MOUNTAIN or s == Structure.CANAL_COVERED:
+		return minf(dug, GameConfig.TUNNEL_DATUM_ELEVATION)
+	return dug
 
 ## Hydraulic head: floor height plus the depth of water standing on it.
 func head(idx: int) -> float:

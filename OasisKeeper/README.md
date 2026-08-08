@@ -51,15 +51,27 @@ downstream, an open channel loses most of it to the sun before it arrives,
 a covered one delivers nearly all of it, and the aquifer draws down while
 you pull on it.
 
-## Controls
+## Controls and UI
+
+The build UI is in two parts:
+
+- A **category bar across the bottom**, always visible: Inspect, Channels,
+  Storage & Wells, Structures, Plants, Overlays, Demolish.
+- Picking a category opens a **detail panel down the left side** listing
+  that category's items with full descriptions. Clicking the same category
+  again closes it, so the map is never permanently covered.
+
+Inspect and Demolish are direct tools -- they select immediately and close
+the panel.
 
 - **Left click / drag** on the map: apply the selected tool.
 - **Right click**: back to Inspect.
-- **Number keys 1-9, 0**: select tools directly (shown on each button).
+- **Number keys**: pick a category (shown on each button). While a category
+  is open, **Q/W/E** pick items within it.
 - **Arrow keys / WASD**: pan. **Scroll wheel**: zoom.
 - The cursor outline turns **green** where the current tool can build and
-  **red** where it cannot; the reason is printed at the bottom of the build
-  panel.
+  **red** where it cannot; the reason appears at the bottom of the panel.
+- A tile inspector sits bottom-right and follows the cursor.
 
 ## How the water works
 
@@ -79,12 +91,21 @@ down to your fields. A tunnel tile sitting on an aquifer body draws from it
 automatically.
 
 **Water flows tile to tile, downhill.** Every water structure has a floor
-`CANAL_FLOOR_DEPTH` below the terrain and holds a depth of water on top of
-it. Each tick, every connected pair of neighbours moves a fraction of their
-hydraulic head difference (floor + water depth) from the higher to the
-lower. So water runs along a channel, pools where the ground flattens, and
-will not climb a rise. The valley slopes gently from north to south, giving
-the whole map a consistent downhill direction to work with.
+below the terrain and holds a depth of water on top of it. Each tick, every
+connected pair of neighbours moves a fraction of their hydraulic head
+difference (floor + water depth) from the higher to the lower. So water runs
+along a channel, pools where the ground flattens, and will not climb a rise.
+The valley slopes gently from north to south, giving the whole map a
+consistent downhill direction to work with.
+
+**Trenches follow the ground; buried conduits are cut to a gradient.** This
+distinction is load-bearing. An open canal is a trench: its floor follows
+the surface, so it cannot cross high land. Mountain tunnels and covered
+canals are bored/buried on a descending gradient, so their floor is capped
+at a datum just above the valley floor -- the qanat principle. Without that,
+a channel leaving a range would have to climb the ridge crest and then the
+scree apron of the foothills, and water would never reach the valley at all.
+On flat valley ground the cap never binds and both behave identically.
 
 You can *see* this: canal tiles show their fill level directly (the stream
 widens and deepens in colour as the tile fills, and an empty channel shows
@@ -98,6 +119,7 @@ the arrows off in the build panel if you find them noisy.
 | Digging cost | 1x | 2x |
 | Evaporation | full, and worse in heat/wind/sun | negligible |
 | Waters adjacent soil | yes | no |
+| Can cross high ground | no (follows the surface) | yes (cut to a gradient) |
 | Looks like | visible water channel | slabbed lid with joint lines |
 
 An open canal is how you actually irrigate -- it wets the ground either
@@ -168,13 +190,15 @@ scripts/
   entities/PlantInstance.gd    lightweight runtime state for one specimen
   resources/PlantData.gd       data-driven species definition (Resource)
   rendering/
-    TerrainBaker.gd          bakes the static terrain image with hillshading
+    TerrainBaker.gd          bakes the terrain image + tiling grain texture
     WorldRenderer.gd         data overlays + structures + plants + flow arrows
     NightCycleController.gd  day/night tint
   camera/CameraController.gd
   ui/  HUD.gd, BuildMenu.gd, TileInspector.gd   built in code, no .tscn layouts
+       UILayout.gd    explicit anchor/offset helpers (see note below)
   MainController.gd   thin coordinator: input -> tool -> system calls
   SelfTest.gd         headless smoke test
+  Screenshotter.gd    headless screenshot + Control-rect dump (dev only)
 
 data/plants/*.tres    14 species as data files
 ```
@@ -231,6 +255,33 @@ behind it. Nothing else hardcodes a tuning number.
 - Plants are drawn procedurally per category -- palms get radiating fronds,
   shrubs get overlapping clusters, flowers get petals -- scaled by growth
   and browned by poor health.
+
+## Development tools
+
+Two things exist purely to make this project verifiable without a human at
+the keyboard, which is how it was built and tuned:
+
+- `--sim-selftest` (see above) builds a working network and prints water
+  depths along it.
+- `--screenshot <path>` renders a frame and writes a PNG, then dumps the
+  on-screen rect of every Control. Optional companions:
+  `--screenshot-frames N`, `--screenshot-zoom Z`, `--screenshot-hour H`
+  (freezes the clock at that hour so lighting is reproducible), and
+  `--screenshot-open <category>` to open a build category. Run it under a
+  virtual display:
+
+```
+xvfb-run -a godot --path OasisKeeper --rendering-driver opengl3 \
+  --resolution 1600x900 --quit-after 600 \
+  -- --screenshot /tmp/shot.png --screenshot-frames 400 --screenshot-hour 12
+```
+
+The Control-rect dump is worth knowing about: it is what caught a bug where
+`Control.set_anchors_preset()` (whose default `keep_offsets = false`
+recalculates offsets to *preserve the control's current rect*) faithfully
+preserved the 0x0 size a panel had in the scene file, so the entire build
+menu existed, reported `visible = true`, and drew nothing. `UILayout` now
+sets anchors and offsets explicitly to remove that trap.
 
 ## Known simplifications
 

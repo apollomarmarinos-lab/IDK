@@ -28,6 +28,7 @@ func _ready() -> void:
 	build_menu.flow_toggled.connect(func(v): world.set_show_flow(v))
 	if OS.get_cmdline_user_args().has("--sim-selftest"):
 		SelfTest.run(self)
+	Screenshotter.install(self)
 
 func _process(_delta: float) -> void:
 	var idx: int = _tile_at_mouse()
