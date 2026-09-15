@@ -153,14 +153,14 @@ static func _find_downstream_neighbor(
 ) -> int:
 	"""Find the lowest neighboring tile for water flow."""
 	var x = tile_idx % grid_width
-	var y = tile_idx / grid_width
+	var y = float(tile_idx) / float(grid_width)
 	var lowest_idx = -1
 	var lowest_elev = terrain_elevation[tile_idx]
 	
 	var directions = [[-1, 0], [1, 0], [0, -1], [0, 1]]
 	for dir in directions:
 		var nx = x + dir[0]
-		var ny = y + dir[1]
+		var ny = int(y) + dir[1]
 		if nx >= 0 and nx < grid_width and ny >= 0 and ny < grid_height:
 			var n_idx = ny * grid_width + nx
 			if terrain_elevation[n_idx] < lowest_elev:
@@ -179,12 +179,12 @@ static func _get_connected_neighbors(
 	"""Get neighboring tiles that are connected for water flow."""
 	var neighbors: Array[int] = []
 	var x = tile_idx % grid_width
-	var y = tile_idx / grid_width
+	var y = float(tile_idx) / float(grid_width)
 	
 	var directions = [[-1, 0], [1, 0], [0, -1], [0, 1]]
 	for dir in directions:
 		var nx = x + dir[0]
-		var ny = y + dir[1]
+		var ny = int(y) + dir[1]
 		if nx >= 0 and nx < grid_width and ny >= 0 and ny < grid_height:
 			var n_idx = ny * grid_width + nx
 			# Check if tiles are connected (both are water/canal tiles)

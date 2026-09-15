@@ -187,7 +187,7 @@ static func _calculate_slope(
 ) -> float:
 	"""Calculate slope gradient at a tile using neighboring elevations."""
 	var x = tile_idx % grid_width
-	var y = tile_idx / grid_width
+	var y = float(tile_idx) / float(grid_width)
 	var center_elev = terrain_elevation[tile_idx]
 	
 	var max_diff = 0.0
@@ -195,7 +195,7 @@ static func _calculate_slope(
 	
 	for dir in directions:
 		var nx = x + dir[0]
-		var ny = y + dir[1]
+		var ny = int(y) + dir[1]
 		if nx >= 0 and nx < grid_width and ny >= 0 and ny < grid_height:
 			var n_idx = ny * grid_width + nx
 			var diff = abs(terrain_elevation[n_idx] - center_elev)
@@ -213,7 +213,7 @@ static func _get_neighbors(
 	"""Get all neighboring tile indices within given radius."""
 	var neighbors: Array[int] = []
 	var x = tile_idx % grid_width
-	var y = tile_idx / grid_width
+	var y = float(tile_idx) / float(grid_width)
 	
 	for dy in range(-radius, radius + 1):
 		for dx in range(-radius, radius + 1):
@@ -221,7 +221,7 @@ static func _get_neighbors(
 				continue
 			
 			var nx = x + dx
-			var ny = y + dy
+			var ny = int(y) + dy
 			
 			if nx >= 0 and nx < grid_width and ny >= 0 and ny < grid_height:
 				neighbors.append(ny * grid_width + nx)

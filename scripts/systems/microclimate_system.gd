@@ -89,7 +89,7 @@ static func _calculate_shade_layer(
 		var shade_density = plant.get("shade_density", 0.8)
 		
 		var plant_x = plant_tile % grid_width
-		var plant_y = plant_tile / grid_width
+		var plant_y = float(plant_tile) / float(grid_width)
 		
 		# Apply shade to all tiles within radius
 		for dy in range(-shade_radius, shade_radius + 1):
@@ -187,7 +187,7 @@ static func _get_neighbors(
 	"""Get all neighboring tile indices within given radius."""
 	var neighbors: Array[int] = []
 	var x = tile_idx % grid_width
-	var y = tile_idx / grid_width
+	var y = float(tile_idx) / float(grid_width)
 	
 	for dy in range(-radius, radius + 1):
 		for dx in range(-radius, radius + 1):
@@ -195,7 +195,7 @@ static func _get_neighbors(
 				continue  # Skip the center tile
 			
 			var nx = x + dx
-			var ny = y + dy
+			var ny = int(y) + dy
 			
 			if nx >= 0 and nx < grid_width and ny >= 0 and ny < grid_height:
 				neighbors.append(ny * grid_width + nx)
