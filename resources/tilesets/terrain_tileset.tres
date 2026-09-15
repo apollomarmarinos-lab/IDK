@@ -1,0 +1,17 @@
+[gd_resource type="TileSet" format=3 uid="uid://tileset_terrain"]
+
+[sub_resource type="TileSetAtlasSource" id="TileSetAtlasSource_programmer_art"]
+image = null
+tile_size = Vector2i(32, 32)
+texture_region_size = Vector2i(32, 32)
+tiles = {
+"0": Vector2i(0, 0),
+"1": Vector2i(1, 0),
+"2": Vector2i(2, 0)
+}
+
+[node name="TileSet" type="TileSet"]
+tile_shape = 0
+tile_layout = 0
+tile_offset_axis = 0
+sources = [SubResource("TileSetAtlasSource_programmer_art")]

@@ -1,12 +1,20 @@
-[gd_scene load_steps=3 format=3 uid="uid://main_game_scene"]
+[gd_scene load_steps=6 format=3 uid="uid://main_game_scene"]
 
 [sub_resource type="GDScript" id="GDScript_main"]
 script_path = "res://scenes/main_game.gd"
+
+[sub_resource type="GDScript" id="GDScript_debug"]
+script_path = "res://debug/debug_overlay.gd"
 
 [sub_resource type="TileSet" id="TileSet_terrain"]
 tile_shape = 0
 tile_layout = 0
 tile_offset_axis = 0
+
+[sub_resource type="TileSetAtlasSource" id="TileSetAtlasSource_programmer_art"]
+image = null
+tile_size = Vector2i(32, 32)
+texture_region_size = Vector2i(32, 32)
 
 [node name="MainGame" type="Node2D"]
 script = SubResource("GDScript_main")
@@ -16,9 +24,8 @@ script = SubResource("GDScript_main")
 [node name="TileMapLayer" type="TileMapLayer" parent="."]
 tile_set = SubResource("TileSet_terrain")
 y_sort_enabled = true
+z_index = 0
 
 [node name="DebugOverlay" type="CanvasLayer" parent="."]
 layer = 100
-
-[node name="Sprite2D" type="Sprite2D" parent="DebugOverlay"]
-position = Vector2(512, 384)
+script = SubResource("GDScript_debug")

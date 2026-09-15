@@ -17,6 +17,22 @@ func _ready() -> void:
 	"""Initialize the game."""
 	print("=== Desert Valley Colony Sim ===")
 	
+	# Get references
+	sim_manager = get_node_or_null("SimulationManager")
+	tile_map = get_node_or_null("TileMapLayer")
+	debug_overlay = get_node_or_null("DebugOverlay")
+	
+	if sim_manager == null:
+		push_error("SimulationManager not found!")
+		return
+	
+	if tile_map == null:
+		push_error("TileMapLayer not found!")
+		return
+	
+	# Wait a frame to ensure autoload is ready
+	await get_tree().process_frame
+	
 	# Initialize simulation manager systems
 	_initialize_systems()
 	
@@ -24,7 +40,7 @@ func _ready() -> void:
 	_generate_world()
 	
 	# Setup debug overlay if enabled
-	if enable_debug_overlays:
+	if enable_debug_overlays and debug_overlay:
 		_setup_debug_overlay()
 	
 	# Create some test plants
@@ -60,6 +76,7 @@ func _generate_world() -> void:
 func _render_terrain() -> void:
 	"""Render the terrain based on simulation data."""
 	if tile_map == null:
+		print("ERROR: TileMapLayer is null!")
 		return
 	
 	var grid_width = sim_manager.GRID_WIDTH
@@ -70,7 +87,7 @@ func _render_terrain() -> void:
 	# Clear existing tiles
 	tile_map.clear()
 	
-	# Draw terrain tiles
+	# Draw terrain tiles with programmer art colors
 	for y in range(grid_height):
 		for x in range(grid_width):
 			var idx = y * grid_width + x
@@ -87,6 +104,8 @@ func _render_terrain() -> void:
 					tile_id = 2
 			
 			tile_map.set_cell(Vector2i(x, y), 0, Vector2i(tile_id, 0))
+	
+	print("Terrain rendered: %dx%d grid" % [grid_width, grid_height])
 
 
 func _setup_debug_overlay() -> void:
@@ -103,8 +122,12 @@ func _create_test_plants() -> void:
 	var alfalfa_data = load("res://resources/plants/alfalfa_data.tres")
 	
 	if date_palm_data == null:
-		# Create programmatically if resource doesn't exist yet
+		print("WARNING: Date Palm data not found, creating programmatically")
 		date_palm_data = CanopyPlantData.new()
+	
+	if alfalfa_data == null:
+		print("WARNING: Alfalfa data not found, creating programmatically")
+		alfalfa_data = AlfalfaPlantData.new()
 	
 	# Find a suitable location (valley tile)
 	var grid_width = sim_manager.GRID_WIDTH
@@ -128,6 +151,9 @@ func _create_test_plants() -> void:
 			if sim_manager.tile_data[neighbor_idx].get("tile_type") == "sand":
 				var alfalfa = PlantSystem.create_plant_instance(alfalfa_data, neighbor_idx, false)
 				sim_manager.active_plants.append(alfalfa)
+		print("Created %d test Alfalfa plants" % neighbors.size())
+	else:
+		print("WARNING: No suitable tile found for test plants")
 
 
 func _get_neighbors(
