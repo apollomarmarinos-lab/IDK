@@ -110,7 +110,7 @@ func _run_simulation_tick(delta: float) -> void:
 	current_rain_intensity = 0.0
 
 
-func _update_water_system_fallback(delta: float, wind: Vector2, rain: float) -> void:
+func _update_water_system_fallback(delta: float, _wind: Vector2, rain: float) -> void:
 	"""Fallback water system implementation (see scripts/systems/water_system.gd)."""
 	# Simplified implementation for testing
 	if rain > 0:
@@ -163,7 +163,7 @@ func _update_plant_health_fallback(delta: float) -> void:
 			stress += (20 - soil_humidity[tile_idx]) * 0.005
 		
 		plant.health -= stress * delta
-		plant.growth_progress += delta if stress == 0 else 0
+		plant.growth_progress += 1.0 if stress == 0 else 0.0
 		
 		if plant.health <= 0:
 			plants_to_remove.append(i)
@@ -176,14 +176,14 @@ func _update_plant_health_fallback(delta: float) -> void:
 func _get_downstream_neighbor(tile_idx: int) -> int:
 	"""Find the lowest neighboring tile for water flow."""
 	var x = tile_idx % GRID_WIDTH
-	var y = tile_idx / GRID_WIDTH
+	var y = float(tile_idx) / float(GRID_WIDTH)
 	var lowest_idx = -1
 	var lowest_elev = terrain_elevation[tile_idx]
 	
 	var directions = [[-1, 0], [1, 0], [0, -1], [0, 1]]
 	for dir in directions:
 		var nx = x + dir[0]
-		var ny = y + dir[1]
+		var ny = int(y) + dir[1]
 		if nx >= 0 and nx < GRID_WIDTH and ny >= 0 and ny < GRID_HEIGHT:
 			var n_idx = ny * GRID_WIDTH + nx
 			if terrain_elevation[n_idx] < lowest_elev:
@@ -202,4 +202,4 @@ func get_tile_index(x: int, y: int) -> int:
 
 func get_tile_coords(index: int) -> Vector2:
 	"""Convert flat array index to x,y coordinates."""
-	return Vector2(index % GRID_WIDTH, index / GRID_WIDTH)
+	return Vector2(index % GRID_WIDTH, float(index) / float(GRID_WIDTH))

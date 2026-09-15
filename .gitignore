@@ -3,27 +3,48 @@
 *.import
 *.remap
 export_presets.cfg
-.user
-.autoloads/
-.debug/
+.autosave/
+.user/
 .scenes/
-.scripts/
-.resources/
+.script_nodes/
+.godot/
+
+# Compiled and build artifacts
+*.so
+*.dylib
+*.dll
+*.exe
+*.o
+*.obj
+*.a
+*.lib
 
 # Dependencies
-.addons/
+res://addons/
+*.import
+*.import/*
 
-# Build artifacts
-*.so
-*.dll
-*.dylib
-*.exe
-*.bin
-
-# Logs
+# Logs and temp files
 *.log
+*.tmp
+*.swp
+*.swo
 
-# OS generated files
-.DS_Store
-Thumbs.db
+# Environment
+.env
+.env.local
+*.env.*
+
+# Editors
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Build outputs
+bin/
+build/
+dist/
+target/
+out/
 ```

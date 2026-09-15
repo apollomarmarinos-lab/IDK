@@ -139,7 +139,7 @@ func _get_neighbors(
 	"""Get neighboring tile indices."""
 	var neighbors: Array[int] = []
 	var x = tile_idx % grid_width
-	var y = tile_idx / grid_width
+	var y = float(tile_idx) / float(grid_width)
 	
 	for dy in range(-radius, radius + 1):
 		for dx in range(-radius, radius + 1):
@@ -147,7 +147,7 @@ func _get_neighbors(
 				continue
 			
 			var nx = x + dx
-			var ny = y + dy
+			var ny = int(y) + dy
 			
 			if nx >= 0 and nx < grid_width and ny >= 0 and ny < grid_height:
 				neighbors.append(ny * grid_width + nx)
