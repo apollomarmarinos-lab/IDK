@@ -28,6 +28,8 @@ static func generate_world(sim_manager: Node, seed_value: int = -1) -> void:
 	var terrain_elevation = sim_manager.terrain_elevation
 	var tile_data = sim_manager.tile_data
 	
+	print("Generating world: %dx%d grid with seed %d" % [grid_width, grid_height, seed_value if seed_value != -1 else randi()])
+	
 	# Create noise resources
 	var elevation_noise = _create_elevation_noise(seed_value)
 	var moisture_noise = _create_moisture_noise(seed_value + 1 if seed_value != -1 else -1)
@@ -48,6 +50,8 @@ static func generate_world(sim_manager: Node, seed_value: int = -1) -> void:
 		sim_manager.water_level, sim_manager.soil_humidity,
 		terrain_elevation, tile_data, grid_width, grid_height
 	)
+	
+	print("World generation complete!")
 
 
 static func _create_elevation_noise(seed_value: int) -> FastNoiseLite:

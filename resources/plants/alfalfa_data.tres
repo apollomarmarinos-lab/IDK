@@ -1,0 +1,19 @@
+[gd_resource type="Resource" format=3 uid="uid://alfalfa_data"]
+script = Extends("res://resources/plants/alfalfa_plant_data.gd")
+
+[node name="AlfalfaData" type="Resource"]
+plant_id = "alfalfa"
+display_name = "Alfalfa"
+description = "Fast-growing ground cover. High transpiration rate, fixes nitrogen."
+base_growth_speed = 1.5
+max_health = 100.0
+recovery_rate = 5.0
+ideal_temp_min = 15.0
+ideal_temp_max = 30.0
+temp_tolerance_range = 10.0
+water_tolerance_min = 30.0
+water_tolerance_max = 70.0
+transpiration_rate = 1.2
+stress_accumulation_rate = 0.15
+is_shade_loving = true
+min_light_requirement = 0.3

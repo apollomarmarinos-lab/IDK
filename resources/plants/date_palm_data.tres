@@ -1,0 +1,23 @@
+[gd_resource type="Resource" format=3 uid="uid://date_palm_data"]
+script = Extends("res://resources/plants/canopy_plant_data.gd")
+
+[node name="DatePalmData" type="Resource"]
+plant_id = "date_palm"
+display_name = "Date Palm"
+description = "The canopy keystone. High drought tolerance, deep taproots, massive shade radius."
+base_growth_speed = 0.3
+max_health = 100.0
+recovery_rate = 5.0
+ideal_temp_min = 25.0
+ideal_temp_max = 45.0
+temp_tolerance_range = 20.0
+water_tolerance_min = 15.0
+water_tolerance_max = 70.0
+transpiration_rate = 0.8
+stress_accumulation_rate = 0.05
+is_shade_loving = false
+shade_radius = 3
+shade_density = 0.8
+taproot_depth = 2.0
+moisture_retention_bonus = 0.2
+windbreak_strength = 0.5
